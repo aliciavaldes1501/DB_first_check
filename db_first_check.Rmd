@@ -14,6 +14,7 @@ library(lubridate)
 library(ggplot2)
 library(stringr)
 library(purrr)
+library(readxl)
 ```
 
 # Read the data
@@ -36,7 +37,7 @@ We will not use these columns, so no problem!
 # Filter to get only resurveys
 
 ```{r}
-db_resurv<-db%>%filter(`ReSurvey plot (Y/N)`=="Y")
+db_resurv <- db %>% filter(`ReSurvey plot (Y/N)` == "Y")
 ```
 
 # Update coordinates
@@ -233,9 +234,20 @@ ggsave(filename=here("output", "figures","issue5.tiff"),
 ```
 
 
-For DK_Naturdata_Res - info about habitat in file from Ilona (field "habitat").
+For DK_Naturdata_Res - info about habitat from Jerker's file (see below).
 
 # ISSUE 6: Observations with wrong country (GIS)
+
+Read text file wrong_countries obtained in ArcGIS:
+
+```{r}
+wrong_countries <- read_delim(here("data", "clean","wrong_countries.txt"),
+                              delim = ";")
+```
+
+```{r}
+write_csv(wrong_countries, here("output", "csv","issue6.csv"))
+```
 
 # ISSUE 7: Different cover abundance scales
 
@@ -672,7 +684,7 @@ db_resurv %>%
 
 All values OK.
 
-# Mosse and lichens identified
+# Mosses and lichens identified
 
 ```{r}
 ggplot(db_resurv, aes(`Mosses identified (Y/N)`)) + geom_bar()
@@ -680,90 +692,6 @@ ggplot(db_resurv, aes(`Lichens identified (Y/N)`)) + geom_bar()
 ```
 
 NA in most cases.
-
-# Info on habitat from DK
-
-## Read the data sent by Ilona from DK
-
-```{r}
-db_DK<-read_tsv(here("data", "raw",
-                  "DK_Naturdata_Res_habitat.txt"))
-```
-
-## See what to do with problems!
-
-```{r}
-problems_DK<-problems(db_DK)
-unique(problems_DK$col)
-```
-
-## Add info on habitat to db_resurv
-
-```{r}
-db_resurv <- db_resurv %>%
-  # Keeping all obs in db_resurv but not all in db_DK
-  left_join(db_DK %>% select(PlotObservationID, HABITAT))
-```
-
-## List of HABITAT
-
-```{r}
-print(db_resurv %>% distinct(HABITAT), n = 100)
-```
-
-When HABITAT == NULL, change to NA.
-
-```{r}
-db_resurv <- db_resurv %>%
-  mutate(HABITAT = ifelse(HABITAT == "NULL", NA, HABITAT))
-```
-
-Write csv:
-
-```{r}
-write_csv(db_resurv %>% distinct(HABITAT),
-          here("data", "clean","list_HABITAT_DK.csv"))
-```
-
-## Cases without habitat info
-
-Cases without ESy EUNIS habitat:
-
-```{r}
-nrow(db_resurv %>% filter(is.na(`Expert System`)))/nrow(db_resurv)
-```
-
-Cases without ESy EUNIS habitat but without HABITAT from DK:
-
-```{r}
-nrow(db_resurv %>% filter(is.na(`Expert System`)&!is.na(HABITAT)))/nrow(db_resurv)
-```
-
-Cases without ESy EUNIS habitat and without HABITAT from DK:
-
-```{r}
-nrow(db_resurv %>% filter(is.na(`Expert System`)&is.na(HABITAT)))/nrow(db_resurv)
-```
-
-Cases without ESy EUNIS habitat and without HABITAT from DK where data is presence / absence:
-
-```{r}
-nrow(db_resurv %>%
-       filter(is.na(`Expert System`) &
-                is.na(HABITAT) &
-                `Cover abundance scale` == "Presence/Absence"))/
-  nrow(db_resurv)
-```
-
-Cases without ESy EUNIS habitat and without HABITAT from DK where data is not presence / absence:
-
-```{r}
-nrow(db_resurv %>%
-       filter(is.na(`Expert System`) &
-                is.na(HABITAT) &
-                `Cover abundance scale` != "Presence/Absence"))/
-  nrow(db_resurv)
-```
 
 # All resurveys for each resurvey plot to send to Bea
 
@@ -786,9 +714,9 @@ db_Europa<- db_resurv %>%
   # and on the unique combination of RS_CODE, ReSurvey site 
   # and updated coordinates (When ReSurvey plot is NA)
   mutate(plot_unique_id = cur_group_id()) %>%
-  select(Country, `Date of recording`, RS_CODE,`ReSurvey site`, `ReSurvey plot`,
-         Lon_updated, Lat_updated, group_coords, `Expert System`,
-         `Location method`, plot_unique_id) %>%
+  select(PlotObservationID, Country, `Date of recording`, RS_CODE,
+         `ReSurvey site`, `ReSurvey plot`, Lon_updated, Lat_updated,
+         group_coords, `Expert System`, `Location method`, plot_unique_id) %>%
   ungroup() %>%
   # Convert dates to date format and get the year
   mutate(date = dmy(`Date of recording`), year = year(date)) %>%
@@ -804,13 +732,400 @@ print(db_Europa, width = Inf)
 Save to csv (file for us):
 
 ```{r}
-write_csv(db_resurv,here("data", "clean","db_Europa_20241210.csv"))
+write_csv(db_Europa,here("data", "clean","db_Europa_20250107.csv"))
 ```
 
 Save to csv (file for Bea, with only essential info):
 
 ```{r}
-write_csv(db_resurv,here("data", "clean","db_Europa_20241210_short.csv"))
+write_csv(db_Europa %>% 
+            select(obs_unique_id, plot_unique_id, Lon_updated, Lat_updated,
+                   year),
+          here("data", "clean","db_Europa_20241210_short.csv"))
+```
+
+# Info on HabitatID from DK 
+
+Based on information got from Jesper.
+
+## Read the data sent by Jesper from DK
+
+```{r}
+db_DK_J<-read_tsv(here("data", "raw",
+                       "DK_Naturdata_Res_habitat_hab_codes_Jesper",
+                  "DK_Naturdata_Res_habitat_hab_codes.txt"))
+```
+
+## Add info on HabitatID to db_resurv
+
+```{r}
+db_resurv <- db_resurv %>%
+  # Keeping all obs in db_resurv but not all in db_DK_J
+  left_join(db_DK_J %>% select(PlotObservationID, HabitatID))
+```
+
+## List of HabitatID
+
+```{r}
+print(db_resurv %>% distinct(HabitatID), n = 100)
+```
+
+Write csv:
+
+```{r}
+write_csv(db_resurv %>% distinct(HabitatID),
+          here("data", "clean","list_HabitatID_DK.csv"))
+```
+
+## Cases without HabitatID info
+
+Cases without ESy EUNIS habitat:
+
+```{r}
+nrow(db_resurv %>% filter(is.na(`Expert System`)))/nrow(db_resurv)
+```
+
+Cases without ESy EUNIS habitat but with HabitatID from DK:
+
+```{r}
+nrow(db_resurv %>% filter(is.na(`Expert System`)&!is.na(HabitatID)))/nrow(db_resurv)
+```
+
+Cases without ESy EUNIS habitat and without HABITAT from DK:
+
+```{r}
+nrow(db_resurv %>% 
+       filter(is.na(`Expert System`)&is.na(HabitatID)))/nrow(db_resurv)
+```
+
+Cases without ESy EUNIS habitat and without HabitatID from DK where data is presence / absence:
+
+```{r}
+nrow(db_resurv %>%
+       filter(is.na(`Expert System`) &
+                is.na(HabitatID) &
+                `Cover abundance scale` == "Presence/Absence"))/
+  nrow(db_resurv)
+```
+
+Cases without ESy EUNIS habitat and without HabitatID from DK where data is not presence / absence:
+
+```{r}
+nrow(db_resurv %>%
+       filter(is.na(`Expert System`) &
+                is.na(HabitatID) &
+                `Cover abundance scale` != "Presence/Absence"))/
+  nrow(db_resurv)
+```
+
+## Change some Annex I habitat codes that were wrong
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(HabitatID = as.character(HabitatID)) %>%
+  mutate(HabitatID = ifelse(HabitatID == "9998", "91D0",
+                            ifelse(HabitatID == "9999", "91E0", HabitatID)))
+```
+
+# Add info on correspondences HabitatID (DK, Jesper) - EUNIS
+
+Read correspondences file:
+
+```{r}
+correspondences<-read_excel(here("data", "edited",
+                                 "correspondence_HabitatID_DK.xlsx"))
+```
+
+Add info to db_resurv:
+
+```{r}
+db_resurv <- db_resurv %>%
+  # Keeping all obs in db_resurv but not all in db_DK_J
+  left_join(correspondences %>% select(HabitatID, EUNIS))
+```
+
+Correct NA values in EUNIS
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(EUNIS = ifelse(EUNIS == "NA", NA, EUNIS))
+```
+
+Add info on EUNIS (DK) to EUNISa:
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(EUNISa =
+           # If EUNIS (DK) is available, add as EUNISa
+           ifelse(!is.na(EUNIS), EUNIS, 
+                  # Otherwise keep EUNISa
+                  EUNISa),
+         EUNIS_assignation = ifelse(!is.na(EUNIS), "Info from DK",
+                                    ifelse(is.na(EUNISa), "Not possible",
+                                           "Expert system"))) %>%
+  # Remove column EUNIS (DK)
+  select(-EUNIS)
+```
+
+```{r}
+ggplot(db_resurv, aes(EUNIS_assignation)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS assignation")
+```
+
+
+## Generate file for ISSUE 5
+
+```{r}
+write_csv(db_resurv %>%
+            filter(is.na(`Expert System`)&is.na(HabitatID)),
+          here("output", "csv","issue5.csv"))
+```
+
+## Update columns for EUNIS levels and descriptions
+
+Update the columns for the different EUNISs levels:
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(
+    # EUNISa levels
+    EUNISa_1 = substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 2, 1)),
+    EUNISa_2 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 3, 2), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISa_3 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 4, 3), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 4, 3)),
+      NA_character_
+      ),
+    EUNISa_4 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 5, 4), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 5, 4)),
+      NA_character_
+    )
+  ) %>%
+  # Remove HabitatID column
+  select(-HabitatID)
+```
+
+Update columns with descriptions for the level 1 codes:
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(
+    EUNISa_1_descr = case_when(
+      EUNISa_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISa_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISa_1 == "T" ~ "Forests and other wooded land",
+      EUNISa_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISa_1 == "R" ~ "Grasslands",
+      EUNISa_1 == "Q" ~ "Wetlands",
+      EUNISa_1 == "P" ~ "Inland waters",
+      EUNISa_1 == "N" ~ "Coastal habitats",
+      EUNISa_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+## Number of different EUNIS codes
+
+Recalculate how many different EUNIS codes have been assigned:
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(
+    # Count the number of non-NA values across the EUNIS columns
+    n_EUNIS = rowSums(!is.na(select(., EUNISa:EUNISd)))
+  )
+```
+
+```{r}
+ggplot(db_resurv, aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+ggplot(db_resurv %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+```
+
+New plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
+
+```{r}
+ggplot(db_resurv, aes(EUNISa_1_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 1") + coord_flip()
+ggplot(db_resurv %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 1") + coord_flip()
+```
+
+# Add info on descriptions for EUNIS levels 2-4
+
+```{r}
+descriptions<-read_excel(here("data", "edited",
+                                 "EUNIS-Habitats-2021-06-01_modified.xlsx"))
+```
+
+```{r}
+# Define the columns and corresponding description column names
+eunis_cols <- c("EUNISa_2", "EUNISa_3", "EUNISa_4",
+                "EUNISb_2", "EUNISb_3", "EUNISb_4", 
+                "EUNISc_2", "EUNISc_3", "EUNISc_4",
+                "EUNISd_2", "EUNISd_3", "EUNISd_4")
+
+# Create corresponding description column names
+descr_col_names <- paste0(eunis_cols, "_descr")
+
+# Use reduce to loop through the columns and join dynamically based on level
+db_resurv <- reduce(seq_along(eunis_cols), function(data, i) {
+  # Extract level number from the column name (e.g., EUNISa_2 -> 2)
+  level <- as.numeric(gsub("\\D", "", eunis_cols[i]))
+  
+  # Filter descriptions for the corresponding level
+  descriptions_level <- descriptions %>%
+    filter(level == level) %>%
+    select(`EUNIS 2020 code`, `EUNIS-2021 habitat name`)
+  
+  # Perform the left_join and rename the column dynamically
+  data %>%
+    left_join(
+      descriptions_level,
+      by = setNames("EUNIS 2020 code", eunis_cols[i])
+    ) %>%
+    rename(!!descr_col_names[i] := `EUNIS-2021 habitat name`)
+}, .init = db_resurv)
+```
+
+The matching did not work sometimes, correct!
+
+```{r}
+# Correct EUNISa levels 2-4 descriptions
+db_resurv <- db_resurv %>%
+  mutate(EUNISa_2_descr = 
+           ifelse(!is.na(EUNISa_2_descr), EUNISa_2_descr,
+                  case_when(
+                    EUNISa_2 == "Pf" ~ "Fresh-water submerged vegetation",
+                    EUNISa_2 == "Pj" ~ "Stonewort vegetation",
+                    EUNISa_2 == "R4" ~ "Alpine and subalpine grasslands",
+                    EUNISa_2 == "Pb" ~ "Calcareous spring and spring brook",
+                    EUNISa_2 == "Qb" ~ "Wetlands",
+                    EUNISa_2 == "R3" ~ "Seasonally wet and wet grasslands",
+                    EUNISa_2 == "Qa" ~ "Mires",
+                    EUNISa_2 == "Pa" ~ "Base-poor spring and spring brook",
+                    EUNISa_2 == "Ph" ~ "Oligotrophic-water vegetation",
+                    EUNISa_2 == "Pg" ~ "Fresh-water nymphaeid vegetation",
+                    EUNISa_2 ==
+                      "Pd" ~ "Fresh-water small pleustophyte vegetation",
+                    EUNISa_2 == "Pc" ~ "Brackish-water vegetation",
+                    EUNISa_2 ==
+                      "Pe" ~ "Fresh-water large pleustophyte vegetation",
+                    EUNISa_2 == "Pi" ~ "Dystrophic-water vegetation",
+                    EUNISa_2 == "S1" ~ "Tundra",
+                    EUNISa_2 ==
+                      "U7" ~ "Unvegetated or sparsely vegetated gravel bars",
+                    EUNISa_2 == "Q6" ~ "Periodically exposed shores",
+                    TRUE ~ NA_character_)
+                  ),
+         EUNISa_3_descr = 
+           ifelse(!is.na(EUNISa_3_descr), EUNISa_3_descr,
+                  case_when(
+                    EUNISa_3 =="U71" ~ "Unvegetated or sparsely vegetated gravel bar in montane and alpine regions",
+                    EUNISa_3 =="Q61" ~ "Periodically exposed shore with stable, eutrophic sediments with pioneer or ephemeral vegetation",
+                    EUNISa_3 =="Q62" ~ "Periodically exposed shore with stable, mesotrophic sediments with pioneer or ephemeral vegetation",
+                    TRUE ~ NA_character_
+                    ))
+         )
+```
+
+```{r}
+# Correct EUNISb levels 2-4 descriptions
+db_resurv <- db_resurv %>%
+  mutate(EUNISb_2_descr = 
+           ifelse(!is.na(EUNISb_2_descr), EUNISb_2_descr,
+                  case_when(
+                    EUNISb_2 == "Pj" ~ "Stonewort vegetation",
+                    EUNISb_2 == "R4" ~ "Alpine and subalpine grasslands",
+                    EUNISb_2 == "Pf" ~ "Fresh-water submerged vegetation",
+                    TRUE ~ NA_character_)
+                  )
+         )
+```
+
+EUNISc and EUNISd levels 2-4 are OK.
+ 
+# Notes EUNIS codes - to change?
+
+https://www.sci.muni.cz/botany/chytry/Schaminee_etal2021_EEA-Report-Aquatic-Wetland-habitats.pdf
+
+EUNISa_2 == "Q6" : "Periodically exposed shores"
+EUNISa_3 = "Q61" : "Periodically exposed shore with stable, eutrophic sediments with
+pioneer or ephemeral vegetation"
+EUNISa_3 == "Q62" : "Periodically exposed shore with stable, mesotrophic sediments with pioneer or ephemeral vegetation"
+
+This classification of Q + numbers is now coexisting in the database with Qa & Qb (metadata). How to proceed?
+
+```{r}
+db_resurv %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_2)
+```
+
+
+# Plots of level-2 categories within each level 1 category
+
+```{r}
+ggplot(db_resurv %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "MA") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "N"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "N") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "P"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "P") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "Q"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "R"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "R") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "S"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "S") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "T"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "T") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "U"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "U") %>% distinct(EUNISa_1_descr))
+ggplot(db_resurv %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(db_resurv %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
 ```
 
 # Session info
