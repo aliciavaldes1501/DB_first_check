@@ -1,8 +1,6 @@
 ---
 title: "Script to make a first check of the MOTIVATE database"
-output:
-  pdf_document: default
-  html_notebook: default
+output: html_notebook
 ---
 
 # Load libraries
@@ -61,6 +59,10 @@ Save to csv:
 ```{r}
 write_csv(db_resurv,here("data", "clean","db_resurv.csv"))
 ```
+
+# Count number of resurveys for each resurvey plot 
+
+In the metadata, resurvey plot defined as unique combination of RS_CODE, ReSurvey site, ReSurvey plot.
 
 # ISSUE 1: ReSurvey plot is NA
 
@@ -139,8 +141,8 @@ db_resurv %>%
             .groups = "drop") %>%
   mutate(coordinate_status = case_when(
     is_equal ~ "Equal",
-    !is_equal & is_consistent ~ "Consistent (< 0.001º)",
-    !is_equal & !is_consistent ~ "Inconsistent (> 0.001º)")) %>%
+    !is_equal & is_consistent ~ "Consistent",
+    !is_equal & !is_consistent ~ "Inconsistent")) %>%
   count(coordinate_status)%>%
   mutate(percentage = n / sum(n) * 100) %>%
   ggplot(aes(x = percentage, y = coordinate_status, fill = coordinate_status)) +
@@ -153,6 +155,7 @@ db_resurv %>%
 ggsave(filename=here("output", "figures","issue3.tiff"),
        width=10,height=7,units="cm",dpi=300)
 ```
+
 
 # ISSUE 4: Some plots have only one resurvey
 
@@ -871,6 +874,7 @@ ggplot(db_resurv, aes(EUNIS_assignation)) +
        x = "EUNIS assignation")
 ```
 
+
 ## Generate file for ISSUE 5
 
 ```{r}
@@ -1082,64 +1086,46 @@ ggplot(db_resurv %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "MA") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","MA_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "N"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "N") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","N_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "P"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "P") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","P_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "Q"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","Q_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "R"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "R") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","R_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "S"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "S") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","S_level2.tiff"),
-       width=16,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "T"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "T") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","T_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "U"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "U") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","U_level2.tiff"),
-       width=16,height=8,units="cm",dpi=300)
 ggplot(db_resurv %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
-ggsave(filename=here("output", "figures","V_level2.tiff"),
-       width=14,height=8,units="cm",dpi=300)
 ```
 
 # Session info
