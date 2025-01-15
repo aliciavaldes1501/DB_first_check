@@ -1,0 +1,46 @@
+---
+title: "Makefile for running all analyses"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook that will run all analyses (i.e. all R Notebooks) sequentially
+
+# Load libraries
+
+```{r}
+library(here)
+```
+
+# List of R Notebooks to run
+
+```{r}
+notebooks <- c("1_divide_db_resurv_EVA.Rmd",
+               "2_db_resurv_first_check.Rmd",
+               "3_db_EVA_first_check.Rmd",
+               "4_db_resurv_and_EVA_acc_EUNIS.Rmd")
+```
+
+# Run each notebook sequentially
+
+```{r}
+for (notebook in notebooks) {
+  message("Running: ", notebook)
+  
+  # Extract R code to a temporary file
+  temp_file <- tempfile(fileext = ".R")
+  knitr::purl(notebook, output = temp_file)
+  
+  # Source the extracted R script
+  source(temp_file)
+  
+  # Remove the temporary file after sourcing
+  unlink(temp_file)
+}
+```
+
+# Session info
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,55 @@
+---
+title: "Script to divide the MOTIVATE database into EVA ReSurvey and EVA (not ReSurvey)"
+output: html_notebook
+---
+
+# Load libraries
+
+```{r}
+library(readr)
+library(dplyr)
+```
+
+# Read the data
+
+```{r}
+db<-read_tsv(here("data", "raw",
+                  "200_MOTIVATE20240412_header_notJUICE_with_precise_coordinates.csv"))
+```
+
+# Problems (do not affect us)
+
+```{r}
+problems<-problems(db)
+sort(unique(problems$col))
+names(db[52:69])
+```
+
+We will not use these columns, so no problem!
+
+# Filter to get only resurveys and save db_resurv in edited data folder
+
+```{r}
+db_resurv <- db %>% filter(`ReSurvey plot (Y/N)` == "Y")
+```
+
+```{r}
+write_tsv(db_resurv,here("data", "edited","db_resurv.csv"))
+```
+
+# Filter to get "not resurveys" and save db_EVA in edited data folder
+
+```{r}
+db_EVA <- db %>%
+  filter(`ReSurvey plot (Y/N)` == "N" | is.na(`ReSurvey plot (Y/N)`))
+```
+
+```{r}
+write_tsv(db_EVA,here("data", "edited","db_EVA.csv"))
+```
+
+# Session info
+
+```{r}
+sessionInfo()
+```
