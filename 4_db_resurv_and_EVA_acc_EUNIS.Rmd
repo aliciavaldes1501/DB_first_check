@@ -5,19 +5,15 @@ output:
   html_notebook: default
 ---
 
+```{r, include=FALSE}
 # Set global chunk options
-
-```{r}
 knitr::opts_chunk$set(echo = FALSE)
-```
-
-```{r setup, include=FALSE} 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.width=5.5, fig.height=3.5)
 ```
 
+```{r, include=FALSE}
 # Load libraries
-
-```{r}
 library(here)
 library(readr)
 library(tidyr)
@@ -27,19 +23,19 @@ library(ggplot2)
 library(stringr)
 library(purrr)
 library(readxl)
+library(gridExtra)
+library(cowplot)
 ```
 
+```{r, include=FALSE}
 # Define functions
-
-```{r}
 printall <- function(tibble) {
   print(tibble, width = Inf)
   }
 ```
 
+```{r, include=FALSE}
 # Read the data
-
-```{r}
 db_resurv_clean<-read_tsv(
   here("data", "clean", "db_resurv_clean.csv"),
   col_types = cols(
@@ -124,13 +120,11 @@ db_EVA_clean<-read_tsv(
     EUNISd_4_descr = col_character()
   )
 )
+# No parsing issues!
 ```
 
-No parsing issues!
-
+```{r, include=FALSE}
 # Select key columns and add "database" column
-
-```{r}
 db_resurv_clean <- db_resurv_clean %>%
   select(PlotObservationID, Country, Altitude, `Aspect (°)`, `Slope (°)`,
          starts_with("EUNIS"), `ReSurvey project`, `ReSurvey site`,
@@ -142,7 +136,7 @@ db_resurv_clean <- db_resurv_clean %>%
   mutate(database = "EVA_RS")
 ```
 
-```{r}
+```{r, include=FALSE}
 db_EVA_clean <- db_EVA_clean %>%
   select(PlotObservationID, Country, Altitude, `Aspect (°)`, `Slope (°)`,
          starts_with("EUNIS"), `ReSurvey project`, `ReSurvey site`,
@@ -155,9 +149,8 @@ db_EVA_clean <- db_EVA_clean %>%
   mutate(coordinates_equal = NA, coordinates_consistent = NA)
 ```
 
+```{r, include=FALSE}
 # Combine the two databases
-
-```{r}
 db_resurv_and_EVA <- bind_rows(db_resurv_clean, db_EVA_clean)
 ```
 
@@ -225,18 +218,23 @@ ggplot(db_resurv_and_EVA,
 ggplot(db_resurv_and_EVA %>% 
          # Create column to show two categories for location uncertainty
          mutate(
-           Location_uncertainty_range = case_when(
-             `Location uncertainty (m)` <= 200 ~ "0–0.2 km",
-             `Location uncertainty (m)` <= 500 ~ "0.2–0.5 km",
-             `Location uncertainty (m)` <= 10000 ~ "0.5-10 km",
-             is.na(`Location uncertainty (m)`) ~ "NA",
-             TRUE ~ "10 km +"
-             )
+           Location_uncertainty_range = factor(
+             case_when(
+               `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+               `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+               `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+               `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+               `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+               is.na(`Location uncertainty (m)`) ~ "NA",
+               TRUE ~ "10 km +"
+               ), 
+             levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                        "1 km - 5 km", "5 km - 10 km", "10 km +", "NA"))
            ),
        aes(Location_uncertainty_range, fill = database)) +
   geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "% of observations") +
-  ggtitle("Range of location uncertainty")
+  ggtitle("Range of location uncertainty (EVA + EVA ReSurvey)")
 ```
 
 ```{r}
@@ -257,26 +255,41 @@ ggplot(db_resurv_and_EVA %>%
   ggtitle("Histogram with % of observations (Loc. uncertainty < 0.5 km)")
 ```
 
-# TO DO: Location uncertainty (last resurveys for EVA_RS)
+## Location method
 
-Extract last resurvey for each each ReSurvey plot (defined by combination of RS_CODE, ReSurvey site and ReSurvey plot). So far, discard 111 resurvey observations corresponding to ReSurvey project “Swiss arable flora since the 1920s” (RS_CODE = CH_0002) where ReSurvey plot is NA.
-
-```{r}
-db_resurv_last <- db_resurv_and_EVA %>%
-  filter(database == "EVA_RS") %>% # Keep only EVA ReSurvey
-  # So far remove cases where ReSurvey plot is NA
-  filter(!is.na(`ReSurvey plot`)) %>%
-  # Define a group for each ReSurvey plot
-  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
-  # For each ReSurvey plot, keep only the last year
-  slice_max(order_by = year, n = 1) %>%
-  ungroup()  # Ungroup to return a regular tibble
+```{r fig.height=10, fig.width=13}
+ggplot(db_resurv_and_EVA %>% 
+         # Create column to show two categories for location uncertainty
+         mutate(
+           Location_uncertainty_range = factor(
+             case_when(
+               `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+               `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+               `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+               `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+               `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+               is.na(`Location uncertainty (m)`) ~ "NA",
+               TRUE ~ "10 km +"
+               ), 
+             levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                        "1 km - 5 km", "5 km - 10 km", "10 km +", "NA")),
+           location_method = ifelse(
+             `Location method` %in% c("04", "01", "06", "02", "08", "07", "05",
+                                      "2", "03", "4"), 
+             "Codes", `Location method`)
+           ),
+       aes(Location_uncertainty_range, fill = location_method)) +
+  geom_bar(aes(y = (..count..) / sum(..count..) * 100), 
+           position = position_dodge(width = 0.9)) +
+  facet_wrap(~ database, scales = "free") +
+  labs(y = "% of observations") +
+  theme(legend.position = "top") +
+  ggtitle("Range of location uncertainty (EVA + EVA ReSurvey)")
 ```
 
-Careful! There are plots with muliple records for the last year (and also for other years).
-Solve this and check location uncertainty for last resurveys later on.
-
 # Check for plots with multiple records for the same year
+
+Careful! There are plots with muliple records for the same year (and sometimes same date).
 
 ```{r}
 db_resurv_mult_obs_per_year <- db_resurv_and_EVA %>%
@@ -290,9 +303,31 @@ db_resurv_mult_obs_per_year <- db_resurv_and_EVA %>%
              by = c("RS_CODE", "ReSurvey site", "ReSurvey plot", "year")) 
 ```
 
-Save in file (fewer columns for internal use):
+```{r}
+nrow_db_resurv_mult_obs_per_year <- nrow(
+  db_resurv_mult_obs_per_year %>%
+    distinct(RS_CODE, `ReSurvey site`, `ReSurvey plot`, year)
+  )
+```
+
+For `r nrow_db_resurv_mult_obs_per_year` unique combinations of RS_CODE, ReSurvey site, ReSurvey plot and year, there are multiple records, sometimes with different dates within the year (OK - we choose one), **but also with the same exact date**.
+
+Example below:
 
 ```{r}
+data.frame(
+  db_resurv_mult_obs_per_year %>%
+    filter(`ReSurvey plot` == "N_Cep" & year ==1952) %>%
+    select(PlotObservationID, RS_CODE, `ReSurvey site`, `ReSurvey plot`, year,
+           date, count, Country, EUNISa, `ReSurvey project`,
+           `ReSurvey observation`, Lon_updated, Lat_updated)
+  )
+```
+
+I have sent a list to Ilona to see what to do with this issue.
+
+```{r, include=FALSE}
+# Save in file (fewer columns for internal use)
 write_tsv(db_resurv_mult_obs_per_year %>%
             select(RS_CODE, `ReSurvey site`, `ReSurvey plot`,
                    `ReSurvey observation`, date, year, count,
@@ -301,37 +336,65 @@ write_tsv(db_resurv_mult_obs_per_year %>%
           here("data", "edited","db_resurv_mult_obs_per_year.csv"))
 ```
 
-Save in file (all columns to send to Ilona):
-
-```{r}
+```{r, include=FALSE}
+# Save in file (all columns to send to Ilona)
 write_tsv(db_resurv_mult_obs_per_year,
           here("data", "edited","db_resurv_mult_obs_per_year_Ilona.csv"))
 ```
 
 # Keep GOOD observations WP3
 
-Defining "good" observations as those that have an EUNIS assigned (any level) and where location uncertainty is available and < 0.5 km.
+Defining "good" observations as those that **have an EUNIS assigned** (any level) and where **location uncertainty is available and < 0.5 km** (decide if we use 0.2 or other value?).
 
-```{r}
+```{r, include=FALSE}
 db_resurv_and_EVA_good <- db_resurv_and_EVA %>%
   filter(EUNIS_assignation != "Not possible" &
            `Location uncertainty (m)` < 500) 
 ```
 
-Proportion of "good" observations:
-
 ```{r}
-nrow(db_resurv_and_EVA_good) / nrow(db_resurv_and_EVA)
+prop_good <- nrow(db_resurv_and_EVA_good) / nrow(db_resurv_and_EVA)
 ```
 
-Proportion of observations with EUNIS assigned, irrespective of location uncertainty:
+```{r}
+prop_good_EVA_RS <- nrow(
+  db_resurv_and_EVA_good %>% filter(database == "EVA_RS")
+  ) /
+  nrow(
+    db_resurv_and_EVA %>% filter(database == "EVA_RS"))
+```
+
+From **EVA + EVA ReSurvey**, the **proportion of "good" observations** according to these criteria is **`r round(prop_good, 3)`**.
 
 ```{r}
-nrow(db_resurv_and_EVA %>% filter(EUNIS_assignation != "Not possible")) /
+prop_EUNIS <- nrow(
+  db_resurv_and_EVA %>% filter(EUNIS_assignation != "Not possible")
+  ) /
   nrow(db_resurv_and_EVA)
 ```
 
-Maybe include those without location uncertainty but where location methods is GPS, etc.?
+From **EVA ReSurvey only**, the **proportion of "good" observations** according to these criteria is **`r round(prop_good_EVA_RS, 3)`**.
+
+```{r}
+prop_EUNIS <- nrow(
+  db_resurv_and_EVA %>% filter(EUNIS_assignation != "Not possible")
+  ) /
+  nrow(db_resurv_and_EVA)
+```
+
+```{r}
+prop_EUNIS_EVA_RS <- nrow(
+  db_resurv_and_EVA %>%
+    filter(database == "EVA_RS" & EUNIS_assignation != "Not possible")
+  ) /
+  nrow(db_resurv_and_EVA %>% filter(database == "EVA_RS"))
+```
+
+From **EVA + EVA ReSurvey**, the **proportion of observations with EUNIS assigned, irrespective of location uncertainty** is **`r round(prop_EUNIS, 3)`**.
+
+From **EVA ReSurvey only**, the **proportion of observations with EUNIS assigned, irrespective of location uncertainty** is **`r round(prop_EUNIS_EVA_RS, 3)`**.
+
+Maybe include those without location uncertainty but where location method is GPS, etc.?
 
 # Check for plots with multiple records for the same year in "good" observations
 
@@ -368,14 +431,230 @@ db_resurv_and_EVA_good_no_multiples <- db_resurv_and_EVA_good %>%
   )
 ```
 
-Proportion of "good" observations:
-
 ```{r}
-nrow(db_resurv_and_EVA_good_no_multiples) / nrow(db_resurv_and_EVA)
+prop_good_no_multiples <- nrow(db_resurv_and_EVA_good_no_multiples) /
+  nrow(db_resurv_and_EVA)
 ```
 
-# Session info
+```{r}
+prop_good_no_multiples_EVA_RS <- nrow(
+  db_resurv_and_EVA_good_no_multiples %>% filter(database == "EVA_RS")
+  ) /
+  nrow(db_resurv_and_EVA %>% filter(database == "EVA_RS"))
+```
+
+From **EVA + EVA ReSurvey**, the **proportion of "good" observations** according to the above criteria **that do not have multiple records for the same year** is **`r round(prop_good_no_multiples, 3)`**.
+
+From **EVA ReSurvey only**, the **proportion of "good" observations** according to the above criteria **that do not have multiple records for the same year** is **`r round(prop_good_no_multiples_EVA_RS, 3)`**.
+
+# Location uncertainty (last resurveys for EVA_RS)
+
+Extract last resurvey for each each ReSurvey plot (defined by combination of RS_CODE, ReSurvey site and ReSurvey plot). So far, discard 111 resurvey observations corresponding to ReSurvey project “Swiss arable flora since the 1920s” (RS_CODE = CH_0002) where ReSurvey plot is NA. Discard also plots that have multiple records for the same year (if keeping those, we have to select one record - randomly?).
 
 ```{r}
+db_resurv_last <- db_resurv_and_EVA %>%
+  # Get the rows in db_resurv_and_EVA that do not have matching rows in
+  # db_resurv_mult_obs_per_year based on the specified columns
+  # (i.e. the rows that do not have multiple records for the same year)
+  anti_join(
+    db_resurv_mult_obs_per_year %>%
+      select(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+      distinct(),
+    by = c("RS_CODE", "ReSurvey site", "ReSurvey plot")
+  ) %>%
+  filter(database == "EVA_RS") %>% # Keep only EVA ReSurvey
+  # So far remove cases where ReSurvey plot is NA
+  filter(!is.na(`ReSurvey plot`)) %>%
+  # Define a group for each ReSurvey plot
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  # For each ReSurvey plot, keep only the last year
+  slice_max(order_by = year, n = 1) %>%
+  ungroup()  # Ungroup to return a regular tibble
+```
+
+Check that there is only one record for each year for each plot: OK.
+
+```{r}
+db_resurv_last %>%
+  # Define a group for each ReSurvey plot and year
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`, year) %>%
+  # Count the number of observations for each group
+  summarise(count = n()) %>%
+  # Filter groups with more than one observation
+  filter(count > 1)
+```
+
+
+```{r, include=FALSE}
+# Combine the two databases: EVA and EVA ReSurvey (with only last resurvey)
+db_resurv_last_and_EVA <- bind_rows(db_resurv_last, db_EVA_clean)
+```
+
+## Availabilty
+
+```{r}
+grid.arrange(
+  # EVA + EVA ReSurvey (all resurveys)
+  ggplot(db_resurv_and_EVA %>% 
+           # Create column to show availability of location uncertainty
+           mutate(loc_uncertainty_available = 
+                  ifelse(is.na(`Location uncertainty (m)`), "N", "Y")),
+         aes(loc_uncertainty_available, fill = database)) +
+    geom_bar() +
+    labs(y = "Number of observations") +
+    theme(legend.position = "top") +
+    ggtitle("Availability of location uncertainty\nEVA + EVA ReSurvey (all resurveys)"),
+  # EVA + EVA ReSurvey (last resurvey)
+  ggplot(db_resurv_last_and_EVA %>%
+           # Create column to show availability of location uncertainty
+           mutate(loc_uncertainty_available =
+                    ifelse(is.na(`Location uncertainty (m)`), "N", "Y")),
+         aes(loc_uncertainty_available, fill = database)) +
+    geom_bar() +
+    labs(y = "Number of observations") +
+    theme(legend.position = "top") +
+    ggtitle("Availability of location uncertainty\nEVA + EVA ReSurvey (last resurvey)"),
+  ncol =2)
+```
+
+## Distribution when available
+
+```{r fig.height=5, fig.width=11}
+grid.arrange(
+  ggplot(db_resurv_and_EVA %>%
+           # Create column to show two categories for location uncertainty
+           mutate(
+             Location_uncertainty_range = factor(
+               case_when(
+                 `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+                 `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+                 `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+                 `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+                 `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+                 is.na(`Location uncertainty (m)`) ~ "NA",
+                 TRUE ~ "10 km +"
+                 ), 
+               levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                          "1 km - 5 km", "5 km - 10 km", "10 km +", "NA"))
+             ),
+         aes(Location_uncertainty_range, fill = database)) +
+    geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+    labs(y = "% of observations") +
+    theme(legend.position = "top") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    ggtitle("Range of location uncertainty\nEVA + EVA ReSurvey (all resurveys)"),
+  ggplot(db_resurv_last_and_EVA %>%
+           # Create column to show two categories for location uncertainty
+           mutate(
+             Location_uncertainty_range = factor(
+               case_when(
+                 `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+                 `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+                 `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+                 `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+                 `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+                 is.na(`Location uncertainty (m)`) ~ "NA",
+                 TRUE ~ "10 km +"
+                 ), 
+               levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                          "1 km - 5 km", "5 km - 10 km", "10 km +", "NA"))
+             ),
+         aes(Location_uncertainty_range, fill = database)) +
+    geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+    labs(y = "% of observations") +
+    theme(legend.position = "top") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    ggtitle("Range of location uncertainty\nEVA + EVA ReSurvey (last resurvey)"),
+  ncol = 2)
+```
+
+## Location method
+
+```{r}
+ggplot(db_resurv_and_EVA %>%
+         filter(database == "EVA") %>%
+         # Create column to show two categories for location uncertainty
+         mutate(
+           Location_uncertainty_range = factor(
+             case_when(
+               `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+               `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+               `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+               `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+               `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+               is.na(`Location uncertainty (m)`) ~ "NA",
+               TRUE ~ "10 km +"
+               ), 
+             levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                        "1 km - 5 km", "5 km - 10 km", "10 km +", "NA")),
+           location_method = ifelse(
+             `Location method` %in% c("04", "01", "06", "02", "08", "07", "05",
+                                      "2", "03", "4"), 
+             "Codes", `Location method`)
+           ),
+       aes(Location_uncertainty_range, fill = location_method)) +
+  geom_bar(aes(y = (..count..) / sum(..count..) * 100), 
+           position = position_dodge(width = 0.9)) +
+  labs(y = "% of observations") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Range of location uncertainty\nEVA (without ReSurvey))")
+ggplot(db_resurv_and_EVA %>%
+         filter(database == "EVA_RS") %>%
+         # Create column to show two categories for location uncertainty
+         mutate(
+           Location_uncertainty_range = factor(
+             case_when(
+               `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+               `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+               `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+               `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+               `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+               is.na(`Location uncertainty (m)`) ~ "NA",
+               TRUE ~ "10 km +"
+               ), 
+             levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                        "1 km - 5 km", "5 km - 10 km", "10 km +", "NA")),
+           location_method = ifelse(
+             `Location method` %in% c("04", "01", "06", "02", "08", "07", "05",
+                                      "2", "03", "4"), 
+             "Codes", `Location method`)
+           ),
+       aes(Location_uncertainty_range, fill = location_method)) +
+  geom_bar(aes(y = (..count..) / sum(..count..) * 100), 
+           position = position_dodge(width = 0.9)) +
+  labs(y = "% of observations") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Range of location uncertainty\nEVA ReSurvey (all resurveys))")
+ggplot(db_resurv_last_and_EVA %>%
+           filter(database == "EVA_RS") %>%
+           # Create column to show two categories for location uncertainty
+           mutate(
+             Location_uncertainty_range = factor(
+               case_when(
+                 `Location uncertainty (m)` <= 30 ~ "0 – 30 m",
+                 `Location uncertainty (m)` <= 200 ~ "30 m – 200 m",
+                 `Location uncertainty (m)` <= 1000 ~ "200 m - 1 km",
+                 `Location uncertainty (m)` <= 5000 ~ "1 km - 5 km",
+                 `Location uncertainty (m)` <= 10000 ~ "5 km - 10 km",
+                 is.na(`Location uncertainty (m)`) ~ "NA",
+                 TRUE ~ "10 km +"
+                 ), 
+               levels = c("0 – 30 m", "30 m – 200 m", "200 m - 1 km", 
+                          "1 km - 5 km", "5 km - 10 km", "10 km +", "NA")),
+             location_method = ifelse(
+               `Location method` %in% c("04", "01", "06", "02", "08", "07",
+                                        "05", "2", "03", "4"),
+               "Codes", `Location method`)
+             ),
+         aes(Location_uncertainty_range, fill = location_method)) +
+    geom_bar(aes(y = (..count..) / sum(..count..) * 100), 
+             position = position_dodge(width = 0.9)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(y = "% of observations") +
+    ggtitle("Range of location uncertainty\nEVA ReSurvey (last resurveys)")
+```
+
+```{r, include=FALSE}
+# Session info
 sessionInfo()
 ```

@@ -1757,12 +1757,6 @@ EVA ReSurvey and EVA (not ReSurvey)</h1>
 <h1>Load libraries</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHViR2xpY21GeWVTaHlaV0ZrY2lsY2JteHBZbkpoY25rb1pIQnNlWElwWEc1Z1lHQWlmUT09IC0tPlxuXG5gYGByXG5saWJyYXJ5KHJlYWRyKVxubGlicmFyeShkcGx5cilcbmBgYFxuXG48IS0tIHJuYi1zb3VyY2UtZW5kIC0tPlxuIn0= -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeShyZWFkcilcbmxpYnJhcnkoZHBseXIpXG5gYGAifQ== -->
-<pre class="r"><code>library(readr)
-library(dplyr)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>
@@ -1770,11 +1764,16 @@ library(dplyr)</code></pre>
 <h1>Read the data</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVaR0k4TFhKbFlXUmZkSE4yS0dobGNtVW9YQ0prWVhSaFhDSXNJRndpY21GM1hDSXNYRzRnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0JjSWpJd01GOU5UMVJKVmtGVVJUSXdNalF3TkRFeVgyaGxZV1JsY2w5dWIzUktWVWxEUlY5M2FYUm9YM0J5WldOcGMyVmZZMjl2Y21ScGJtRjBaWE11WTNOMlhDSXBLVnh1WUdCZ0luMD0gLS0+XG5cbmBgYHJcbmRiPC1yZWFkX3RzdihoZXJlKFwiZGF0YVwiLCBcInJhd1wiLFxuICAgICAgICAgICAgICAgICAgXCIyMDBfTU9USVZBVEUyMDI0MDQxMl9oZWFkZXJfbm90SlVJQ0Vfd2l0aF9wcmVjaXNlX2Nvb3JkaW5hdGVzLmNzdlwiKSlcbmBgYFxuXG48IS0tIHJuYi1zb3VyY2UtZW5kIC0tPlxuIn0= -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuZGI8LXJlYWRfdHN2KGhlcmUoXCJkYXRhXCIsIFwicmF3XCIsXG4gICAgICAgICAgICAgICAgICBcIjIwMF9NT1RJVkFURTIwMjQwNDEyX2hlYWRlcl9ub3RKVUlDRV93aXRoX3ByZWNpc2VfY29vcmRpbmF0ZXMuY3N2XCIpKVxuYGBgIn0= -->
-<pre class="r"><code>db&lt;-read_tsv(here(&quot;data&quot;, &quot;raw&quot;,
-                  &quot;200_MOTIVATE20240412_header_notJUICE_with_precise_coordinates.csv&quot;))</code></pre>
-<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiQXZpc286IE9uZSBvciBtb3JlIHBhcnNpbmcgaXNzdWVzLCBjYWxsIGBwcm9ibGVtcygpYCBvbiB5b3VyIGRhdGEgZnJhbWUgZm9yIGRldGFpbHMsIGUuZy46XG4gIGRhdCA8LSB2cm9vbSguLi4pXG4gIHByb2JsZW1zKGRhdClSb3dzOiAyMzg3MTE3IENvbHVtbnM6IDY54pSA4pSAIENvbHVtbiBzcGVjaWZpY2F0aW9uIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgFxuRGVsaW1pdGVyOiBcIlxcdFwiXG5jaHIgKDMzKTogQ291bnRyeSwgQmlibGlvcmVmZXJlbmNlLCBOci4gdGFibGUgaW4gcHVibC4sIE5yLiByZWxldsOpIGluIHRhYmxlLCBDb3YuLi5cbmRibCAoMjApOiBQbG90T2JzZXJ2YXRpb25JRCwgUGxvdElELCBUVjIgcmVsZXbDqSBudW1iZXIsIFJlbGV2w6kgYXJlYSAobcKyKSwgQXNwZWN0Li4uXG5sZ2wgKDE2KTogTG9uMSwgTG9uMiwgTG9uMywgTG9uNCwgTGF0MSwgTGF0MiwgTGF0MywgTGF0NCwgWDEsIFgyLCBYMywgWDQsIFkxLCBZMi4uLlxu4oS5IFVzZSBgc3BlYygpYCB0byByZXRyaWV2ZSB0aGUgZnVsbCBjb2x1bW4gc3BlY2lmaWNhdGlvbiBmb3IgdGhpcyBkYXRhLlxu4oS5IFNwZWNpZnkgdGhlIGNvbHVtbiB0eXBlcyBvciBzZXQgYHNob3dfY29sX3R5cGVzID0gRkFMU0VgIHRvIHF1aWV0IHRoaXMgbWVzc2FnZS5cbiJ9 -->
+<pre><code>Aviso: One or more parsing issues, call `problems()` on your data frame for details, e.g.:
+  dat &lt;- vroom(...)
+  problems(dat)Rows: 2387117 Columns: 69── Column specification ────────────────────────────────────────────────────────────
+Delimiter: &quot;\t&quot;
+chr (33): Country, Biblioreference, Nr. table in publ., Nr. relevé in table, Cov...
+dbl (20): PlotObservationID, PlotID, TV2 relevé number, Relevé area (m²), Aspect...
+lgl (16): Lon1, Lon2, Lon3, Lon4, Lat1, Lat2, Lat3, Lat4, X1, X2, X3, X4, Y1, Y2...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
 <!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
@@ -1783,12 +1782,10 @@ library(dplyr)</code></pre>
 <h1>Problems (do not affect us)</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVjSEp2WW14bGJYTThMWEJ5YjJKc1pXMXpLR1JpS1Z4dWMyOXlkQ2gxYm1seGRXVW9jSEp2WW14bGJYTWtZMjlzS1NsY2JtNWhiV1Z6S0dSaVd6VXlPalk1WFNsY2JtQmdZQ0o5IC0tPlxuXG5gYGByXG5wcm9ibGVtczwtcHJvYmxlbXMoZGIpXG5zb3J0KHVuaXF1ZShwcm9ibGVtcyRjb2wpKVxubmFtZXMoZGJbNTI6NjldKVxuYGBgXG5cbjwhLS0gcm5iLXNvdXJjZS1lbmQgLS0+XG4ifQ== -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucHJvYmxlbXM8LXByb2JsZW1zKGRiKVxuc29ydCh1bmlxdWUocHJvYmxlbXMkY29sKSlcbm5hbWVzKGRiWzUyOjY5XSlcbmBgYCJ9 -->
-<pre class="r"><code>problems&lt;-problems(db)
-sort(unique(problems$col))
-names(db[52:69])</code></pre>
-<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiIFsxXSA1MiA1MyA1NCA1NSA1NiA1NyA1OCA1OSA2MiA2MyA2NCA2NSA2NiA2NyA2OCA2OVxuIFsxXSBcIkxvbjFcIiBcIkxvbjJcIiBcIkxvbjNcIiBcIkxvbjRcIiBcIkxhdDFcIiBcIkxhdDJcIiBcIkxhdDNcIiBcIkxhdDRcIiBcIlhcIiAgICBcIllcIiAgICBcIlgxXCIgIFxuWzEyXSBcIlgyXCIgICBcIlgzXCIgICBcIlg0XCIgICBcIlkxXCIgICBcIlkyXCIgICBcIlkzXCIgICBcIlk0XCIgIFxuIn0= -->
+<pre><code> [1] 52 53 54 55 56 57 58 59 62 63 64 65 66 67 68 69
+ [1] &quot;Lon1&quot; &quot;Lon2&quot; &quot;Lon3&quot; &quot;Lon4&quot; &quot;Lat1&quot; &quot;Lat2&quot; &quot;Lat3&quot; &quot;Lat4&quot; &quot;X&quot;    &quot;Y&quot;    &quot;X1&quot;  
+[12] &quot;X2&quot;   &quot;X3&quot;   &quot;X4&quot;   &quot;Y1&quot;   &quot;Y2&quot;   &quot;Y3&quot;   &quot;Y4&quot;  </code></pre>
 <!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
@@ -1799,20 +1796,10 @@ names(db[52:69])</code></pre>
 folder</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVaR0pmY21WemRYSjJJRHd0SUdSaUlDVStKU0JtYVd4MFpYSW9ZRkpsVTNWeWRtVjVJSEJzYjNRZ0tGa3ZUaWxnSUQwOUlGd2lXVndpS1Z4dVlHQmdJbjA9IC0tPlxuXG5gYGByXG5kYl9yZXN1cnYgPC0gZGIgJT4lIGZpbHRlcihgUmVTdXJ2ZXkgcGxvdCAoWS9OKWAgPT0gXCJZXCIpXG5gYGBcblxuPCEtLSBybmItc291cmNlLWVuZCAtLT5cbiJ9 -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuZGJfcmVzdXJ2IDwtIGRiICU+JSBmaWx0ZXIoYFJlU3VydmV5IHBsb3QgKFkvTilgID09IFwiWVwiKVxuYGBgIn0= -->
-<pre class="r"><code>db_resurv &lt;- db %&gt;% filter(`ReSurvey plot (Y/N)` == &quot;Y&quot;)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVkM0pwZEdWZmRITjJLR1JpWDNKbGMzVnlkaXhvWlhKbEtGd2laR0YwWVZ3aUxDQmNJbVZrYVhSbFpGd2lMRndpWkdKZmNtVnpkWEoyTG1OemRsd2lLU2xjYm1CZ1lDSjkgLS0+XG5cbmBgYHJcbndyaXRlX3RzdihkYl9yZXN1cnYsaGVyZShcImRhdGFcIiwgXCJlZGl0ZWRcIixcImRiX3Jlc3Vydi5jc3ZcIikpXG5gYGBcblxuPCEtLSBybmItc291cmNlLWVuZCAtLT5cbiJ9 -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGVfdHN2KGRiX3Jlc3VydixoZXJlKFwiZGF0YVwiLCBcImVkaXRlZFwiLFwiZGJfcmVzdXJ2LmNzdlwiKSlcbmBgYCJ9 -->
-<pre class="r"><code>write_tsv(db_resurv,here(&quot;data&quot;, &quot;edited&quot;,&quot;db_resurv.csv&quot;))</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>
@@ -1821,21 +1808,10 @@ folder</h1>
 folder</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVaR0pmUlZaQklEd3RJR1JpSUNVK0pWeHVJQ0JtYVd4MFpYSW9ZRkpsVTNWeWRtVjVJSEJzYjNRZ0tGa3ZUaWxnSUQwOUlGd2lUbHdpSUh3Z2FYTXVibUVvWUZKbFUzVnlkbVY1SUhCc2IzUWdLRmt2VGlsZ0tTbGNibUJnWUNKOSAtLT5cblxuYGBgclxuZGJfRVZBIDwtIGRiICU+JVxuICBmaWx0ZXIoYFJlU3VydmV5IHBsb3QgKFkvTilgID09IFwiTlwiIHwgaXMubmEoYFJlU3VydmV5IHBsb3QgKFkvTilgKSlcbmBgYFxuXG48IS0tIHJuYi1zb3VyY2UtZW5kIC0tPlxuIn0= -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuZGJfRVZBIDwtIGRiICU+JVxuICBmaWx0ZXIoYFJlU3VydmV5IHBsb3QgKFkvTilgID09IFwiTlwiIHwgaXMubmEoYFJlU3VydmV5IHBsb3QgKFkvTilgKSlcbmBgYCJ9 -->
-<pre class="r"><code>db_EVA &lt;- db %&gt;%
-  filter(`ReSurvey plot (Y/N)` == &quot;N&quot; | is.na(`ReSurvey plot (Y/N)`))</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVkM0pwZEdWZmRITjJLR1JpWDBWV1FTeG9aWEpsS0Z3aVpHRjBZVndpTENCY0ltVmthWFJsWkZ3aUxGd2laR0pmUlZaQkxtTnpkbHdpS1NsY2JtQmdZQ0o5IC0tPlxuXG5gYGByXG53cml0ZV90c3YoZGJfRVZBLGhlcmUoXCJkYXRhXCIsIFwiZWRpdGVkXCIsXCJkYl9FVkEuY3N2XCIpKVxuYGBgXG5cbjwhLS0gcm5iLXNvdXJjZS1lbmQgLS0+XG4ifQ== -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGVfdHN2KGRiX0VWQSxoZXJlKFwiZGF0YVwiLCBcImVkaXRlZFwiLFwiZGJfRVZBLmNzdlwiKSlcbmBgYCJ9 -->
-<pre class="r"><code>write_tsv(db_EVA,here(&quot;data&quot;, &quot;edited&quot;,&quot;db_EVA.csv&quot;))</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>
@@ -1843,10 +1819,42 @@ folder</h1>
 <h1>Session info</h1>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG48IS0tIHJuYi1zb3VyY2UtYmVnaW4gZXlKa1lYUmhJam9pWUdCZ2NseHVjMlZ6YzJsdmJrbHVabThvS1Z4dVlHQmdJbjA9IC0tPlxuXG5gYGByXG5zZXNzaW9uSW5mbygpXG5gYGBcblxuPCEtLSBybmItc291cmNlLWVuZCAtLT5cbiJ9 -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuc2Vzc2lvbkluZm8oKVxuYGBgIn0= -->
-<pre class="r"><code>sessionInfo()</code></pre>
-<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiUiB2ZXJzaW9uIDQuNC4yICgyMDI0LTEwLTMxIHVjcnQpXG5QbGF0Zm9ybTogeDg2XzY0LXc2NC1taW5ndzMyL3g2NFxuUnVubmluZyB1bmRlcjogV2luZG93cyAxMCB4NjQgKGJ1aWxkIDE5MDQ1KVxuXG5NYXRyaXggcHJvZHVjdHM6IGRlZmF1bHRcblxuXG5sb2NhbGU6XG5bMV0gTENfQ09MTEFURT1TcGFuaXNoX1NwYWluLnV0ZjggIExDX0NUWVBFPVNwYW5pc2hfU3BhaW4udXRmOCAgIFxuWzNdIExDX01PTkVUQVJZPVNwYW5pc2hfU3BhaW4udXRmOCBMQ19OVU1FUklDPUMgICAgICAgICAgICAgICAgICBcbls1XSBMQ19USU1FPVNwYW5pc2hfU3BhaW4udXRmOCAgICBcblxudGltZSB6b25lOiBFdXJvcGUvUGFyaXNcbnR6Y29kZSBzb3VyY2U6IGludGVybmFsXG5cbmF0dGFjaGVkIGJhc2UgcGFja2FnZXM6XG5bMV0gc3RhdHMgICAgIGdyYXBoaWNzICBnckRldmljZXMgdXRpbHMgICAgIGRhdGFzZXRzICBtZXRob2RzICAgYmFzZSAgICAgXG5cbm90aGVyIGF0dGFjaGVkIHBhY2thZ2VzOlxuIFsxXSBjb3dwbG90XzEuMS4zICAgZ3JpZEV4dHJhXzIuMyAgIHJlYWR4bF8xLjQuMyAgICBwdXJycl8xLjAuMiAgICAgc3RyaW5ncl8xLjUuMSAgXG4gWzZdIGdncGxvdDJfMy41LjEgICBsdWJyaWRhdGVfMS45LjQgZHBseXJfMS4xLjQgICAgIHRpZHlyXzEuMy4xICAgICByZWFkcl8yLjEuNSAgICBcblsxMV0gaGVyZV8xLjAuMSAgICAgXG5cbmxvYWRlZCB2aWEgYSBuYW1lc3BhY2UgKGFuZCBub3QgYXR0YWNoZWQpOlxuIFsxXSBiaXRfNC41LjAuMSAgICAgICBndGFibGVfMC4zLjYgICAgICBjcmF5b25fMS41LjMgICAgICBjb21waWxlcl80LjQuMiAgIFxuIFs1XSB0aWR5c2VsZWN0XzEuMi4xICBwYXJhbGxlbF80LjQuMiAgICBzY2FsZXNfMS4zLjAgICAgICB5YW1sXzIuMy4xMCAgICAgIFxuIFs5XSBmYXN0bWFwXzEuMi4wICAgICBSNl8yLjUuMSAgICAgICAgICBsYWJlbGluZ18wLjQuMyAgICBnZW5lcmljc18wLjEuMyAgIFxuWzEzXSBrbml0cl8xLjQ5ICAgICAgICB0aWJibGVfMy4yLjEgICAgICBtdW5zZWxsXzAuNS4xICAgICBycHJvanJvb3RfMi4wLjQgIFxuWzE3XSBwaWxsYXJfMS45LjAgICAgICB0emRiXzAuNC4wICAgICAgICBybGFuZ18xLjEuNCAgICAgICB1dGY4XzEuMi40ICAgICAgIFxuWzIxXSBzdHJpbmdpXzEuOC40ICAgICB4ZnVuXzAuNDkgICAgICAgICBiaXQ2NF80LjUuMiAgICAgICB0aW1lY2hhbmdlXzAuMy4wIFxuWzI1XSBjbGlfMy42LjMgICAgICAgICB3aXRocl8zLjAuMiAgICAgICBtYWdyaXR0cl8yLjAuMyAgICBkaWdlc3RfMC42LjM3ICAgIFxuWzI5XSBncmlkXzQuNC4yICAgICAgICB2cm9vbV8xLjYuNSAgICAgICByc3R1ZGlvYXBpXzAuMTcuMSBobXNfMS4xLjMgICAgICAgIFxuWzMzXSBsaWZlY3ljbGVfMS4wLjQgICB2Y3Ryc18wLjYuNSAgICAgICBldmFsdWF0ZV8xLjAuMSAgICBnbHVlXzEuOC4wICAgICAgIFxuWzM3XSBmYXJ2ZXJfMi4xLjIgICAgICBjZWxscmFuZ2VyXzEuMS4wICBmYW5zaV8xLjAuNiAgICAgICBjb2xvcnNwYWNlXzIuMS0xIFxuWzQxXSBybWFya2Rvd25fMi4yOSAgICB0b29sc180LjQuMiAgICAgICBwa2djb25maWdfMi4wLjMgICBodG1sdG9vbHNfMC41LjguMVxuIn0= -->
+<pre><code>R version 4.4.2 (2024-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 10 x64 (build 19045)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=Spanish_Spain.utf8  LC_CTYPE=Spanish_Spain.utf8   
+[3] LC_MONETARY=Spanish_Spain.utf8 LC_NUMERIC=C                  
+[5] LC_TIME=Spanish_Spain.utf8    
+
+time zone: Europe/Paris
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] cowplot_1.1.3   gridExtra_2.3   readxl_1.4.3    purrr_1.0.2     stringr_1.5.1  
+ [6] ggplot2_3.5.1   lubridate_1.9.4 dplyr_1.1.4     tidyr_1.3.1     readr_2.1.5    
+[11] here_1.0.1     
+
+loaded via a namespace (and not attached):
+ [1] bit_4.5.0.1       gtable_0.3.6      crayon_1.5.3      compiler_4.4.2   
+ [5] tidyselect_1.2.1  parallel_4.4.2    scales_1.3.0      yaml_2.3.10      
+ [9] fastmap_1.2.0     R6_2.5.1          labeling_0.4.3    generics_0.1.3   
+[13] knitr_1.49        tibble_3.2.1      munsell_0.5.1     rprojroot_2.0.4  
+[17] pillar_1.9.0      tzdb_0.4.0        rlang_1.1.4       utf8_1.2.4       
+[21] stringi_1.8.4     xfun_0.49         bit64_4.5.2       timechange_0.3.0 
+[25] cli_3.6.3         withr_3.0.2       magrittr_2.0.3    digest_0.6.37    
+[29] grid_4.4.2        vroom_1.6.5       rstudioapi_0.17.1 hms_1.1.3        
+[33] lifecycle_1.0.4   vctrs_0.6.5       evaluate_1.0.1    glue_1.8.0       
+[37] farver_2.1.2      cellranger_1.1.0  fansi_1.0.6       colorspace_2.1-1 
+[41] rmarkdown_2.29    tools_4.4.2       pkgconfig_2.0.3   htmltools_0.5.8.1</code></pre>
 <!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 </div>
