@@ -1,0 +1,644 @@
+---
+title: "Script to incorporate corrections sent by Ilona on the ReSurvey database"
+author: "Alicia Valdés"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_notebook
+---
+
+# Load libraries
+
+```{r}
+library(readr)
+library(dplyr)
+library(here)
+library(readxl)
+library(stringr)
+```
+
+# Read the data
+
+```{r}
+db_resurv<-read_tsv(here("data", "edited", "db_resurv.csv"))
+```
+
+# Problems (do not affect us)
+
+```{r}
+problems<-problems(db_resurv)
+sort(unique(problems$col))
+names(db_resurv[c(7,13)])
+```
+
+No problems really!
+
+# Update coordinates
+
+Create new column with old coordinates if new not available, and with new if available.
+
+```{r}
+db_resurv <- db_resurv %>%
+  mutate(Lon_updated = ifelse(is.na(Lon_prec),Longitude,Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec),Latitude,Lat_prec))
+```
+
+```{r}
+print(db_resurv, width = Inf)
+```
+
+# Correction ISSUE 1
+
+Text in Ilona's email: 
+Issue 1: already corrected in the past and for CH_0002 rs_plots filled.
+
+Attached: CH_0002_issue1.txt
+
+```{r}
+correction1<-read_tsv(here("data", "raw", "Data_corrections_Ilona",
+                           "CH_0002_issue1.txt"))
+```
+
+Number of rows in correction1 = number of rows in db with that RS_CODE:
+
+```{r}
+nrow(correction1)
+nrow(db_resurv %>% filter(RS_CODE == "CH_0002"))
+```
+
+number of rows in db with that RS_CODE and plot as NA = 111.
+Number of rows in correction1 with plot as NA = 0.
+
+```{r}
+nrow(db_resurv %>% filter(RS_CODE == "CH_0002" & is.na(`ReSurvey plot`)))
+nrow(correction1 %>% filter(is.na(RS_PLOT)))
+```
+
+Names in correction1 are different from db:
+
+```{r}
+names(db_resurv)
+names(correction1)
+```
+
+Rename columns in correction1 to have the same names as in db_resurv.
+
+```{r}
+correction1 <- correction1 %>%
+  rename(`ReSurvey plot (Y/N)` = RESURVEY,
+         `ReSurvey project` = RS_PROJECT,
+         `ReSurvey site` = RS_SITE,
+         `ReSurvey plot` = RS_PLOT,
+         `ReSurvey observation` = RS_OBSERV,
+         `Location method` = LOC_METHOD) %>%
+  mutate(RS_DUPL = as.character(RS_DUPL))
+```
+
+Update db_resurv only for cases where `ReSurvey plot` is NA.
+
+```{r}
+db_resurv_updated <- db_resurv %>%
+  # Create a column edit_plot to mark rows to update
+  mutate(edit_plot = is.na(`ReSurvey plot`)) %>%
+  # Join with correction1 based on PlotObservationID
+  # Rename column `Resurvey plot` to avoid joining on this column
+  left_join(correction1 %>% select(PlotObservationID, `ReSurvey plot`) %>%
+              rename(`ReSurvey plot.new` = `ReSurvey plot`)) %>%
+  # Update `ReSurvey plot` with the new values if edit_plot = TRUE
+  mutate(`ReSurvey plot` = if_else(edit_plot, 
+                                   `ReSurvey plot.new`, `ReSurvey plot`)) %>%
+  # Remove unneeded column
+  select(-`ReSurvey plot.new`)
+```
+
+Check that there are no rows with `ReSurvey plot` as NA.
+
+```{r}
+nrow(db_resurv_updated %>% filter(is.na(`ReSurvey plot`)))
+```
+
+Check that there are 111 rows where edit_plot is TRUE.
+
+```{r}
+nrow(db_resurv_updated %>% filter(edit_plot))
+```
+
+# Correction ISSUE 2
+
+Text in Ilona's email: 
+Issue 2: I have prepared remarks for datasets (for many send e-mail to custodian). IT_0008 and DE_0031 corrected
+
+Attached: "200_Issue2_datasets.xlsx", "DE_0031_coordinatesfilled.xlsx", "IT_0008_corrected.xlsx".
+
+In "200_Issue2_datasets.xlsx" there is a list of datasets with coordinates missing. For two of them (a and b below), coordinates are added. For others, Ilona sent an email to owner. For others, there is a remark but not sure if she sent email to owner (wait).
+
+I will only update edits_AV in the cases where coordinates are added.
+
+## a
+
+```{r}
+correction2a <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue2",
+       "IT_0008_corrected.xlsx"))
+```
+
+```{r}
+print(correction2a, width = Inf)
+```
+
+Need to update Longitude, Latitude and `Location uncertainty (m)`.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_coords_unc to mark rows to update
+  mutate(edit_coords_unc = `ReSurvey plot (Y/N)` == "Y" & RS_CODE =="IT_0008" &
+           is.na(Longitude)) %>%
+  # Join with correction2a based on PlotObservationID
+  # Rename columns to update to avoid joining on these columns
+  left_join(
+    correction2a %>%
+      select(PlotObservationID, Longitude, Latitude,
+             `Location uncertainty (m)`) %>%
+      rename(Longitude.new = Longitude, Latitude.new = Latitude,
+             `Location uncertainty (m).new` = `Location uncertainty (m)`) %>%
+      # Set `Location uncertainty (m).new` as numeric
+      mutate(`Location uncertainty (m).new` = 
+               as.numeric(`Location uncertainty (m).new`))
+    ) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if edit_coords_unc = TRUE
+  mutate(
+    Longitude = if_else(edit_coords_unc, Longitude.new, Longitude),
+    Latitude = if_else(edit_coords_unc, Latitude.new, Latitude),
+    `Location uncertainty (m)` = if_else(
+      edit_coords_unc,`Location uncertainty (m).new`,
+      `Location uncertainty (m)`)
+    ) %>%
+  # Remove unneeded columns
+  select(-Longitude.new, -Latitude.new, -`Location uncertainty (m).new`)
+```
+
+Check that there are no rows with RS_CODE == "IT_0008" where Longitude, Latitude and Location uncertainty (m) are NA.
+
+```{r}
+nrow(
+  db_resurv_updated %>%
+    filter(RS_CODE == "IT_0008") %>%
+    filter(is.na(Longitude) | is.na(Latitude) |
+             is.na(`Location uncertainty (m)`))
+  )
+```
+
+## b
+
+```{r}
+correction2b <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue2",
+       "DE_0031_coordinatesfilled.xlsx"))
+```
+
+```{r}
+print(correction2b, width = Inf)
+```
+
+Need to update Longitude, Latitude and `Location uncertainty (m)` (I guess this is coded as PRECISION).
+
+```{r}
+nrow(correction2b)
+nrow(db_resurv_updated %>% filter(RS_CODE == "DE_0031"))
+nrow(db_resurv_updated %>% filter(RS_CODE == "DE_0031" & is.na(Longitude)))
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "DE_0031" & is.na(`Location uncertainty (m)`)))
+```
+
+All 363 rows with RS_CODE == "DE_0031" have NAs for coordinates and Location uncertainty.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = `ReSurvey plot (Y/N)` == "Y" & RS_CODE =="DE_0031") %>%
+  # Join with correction2b based on PlotObservationID
+  # Columns to update already have a different name, 
+  # so join will not be done on these columns
+  left_join(
+    correction2b %>% select(PlotObservationID, LONGITUDE, LATITUDE, PRECISION)
+    ) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, LONGITUDE, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
+    ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE, -LATITUDE, -PRECISION)
+```
+
+Check that there are no rows with RS_CODE == "DE_0031" where Longitude, Latitude and Location uncertainty (m) are NA.
+
+```{r}
+nrow(
+  db_resurv_updated %>%
+    filter(RS_CODE == "DE_0031") %>%
+    filter(is.na(Longitude) | is.na(Latitude) |
+             is.na(`Location uncertainty (m)`))
+  )
+```
+
+Check how many rows have no coordinates after these updates.
+
+```{r}
+nrow(db_resurv_updated %>%
+       filter(`ReSurvey plot (Y/N)` == "Y" & is.na(Longitude)))
+```
+
+# Correction ISSUE 3
+
+Text in Ilona's emails: 
+
+Email 1:
+
+Issue3 : again I have prepared remarks for datasets (file 200_Issue3_datasets.xlsx) – in some cases different coordinates for one plot correct. In some cases clear error (Again e-mail to custodians of these datasets) . And also I am sending you files with corrected coordinates. Especially for issue 3 very important is design of resurvey dataset – so please read remark in “200_Issue3_datasets.xlsx”.
+
+Attached: "200_Issue3_datasets.xlsx", "CZ_0019_048_corrected.xlsx", "CZ_0019_corrected.xlsx", "Issue3_CZ_0001_corrected.txt", "Issue3_ES_0003_corrected.xlsx". 
+
+In "200_Issue3_datasets.xlsx" there is a list of datasets with this issue.
+
+Email 2:
+
+I am sending you corrected coordinate for PL_0009 – one coordinate and coding of 1 plot – changes in red.
+
+Attached: "Issue3_PL_0009_coorected.xlsx".
+
+I will only update edits_AV in the cases where coordinates are added.
+
+Based on the info in the "remark" column in 200_Issue3_datasets.xlsx", I created a new column "correct" (in a new file, located in the data/edited folder). This column shows:
+
+- ok: if it is OK to have different coordinates for different observations of the same plot (resampling, etc).
+
+- not_ok: if is not OK to have different coordinates for different observations of the same plot (in most of these cases Ilona has sent an email to custodian of the dataset).
+
+- to_correct: when corrections have to be made based on info on the files that Ilona has sent.
+
+I will use this info to update the edits_AV column.
+
+Read the file in the edited folder.
+
+```{r}
+issue3_datasets <- read_excel(
+  here("data", "edited","200_Issue3_datasets_editedAV.xlsx"))
+```
+
+Create two new columns in db_resurv_updated: coordinates_equal indicating if coordinates are exactly equal between ReSurvey observations, and coordinates_consistent, indicating if coordinates are consistent between ReSurvey observations (consistent meaning that difference < 0.001 degrees).
+
+```{r}
+# Define a threshold (e.g., 0.001 degrees for longitude/latitude differences)
+threshold <- 0.001
+
+db_resurv_updated <- db_resurv_updated %>%
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  mutate(
+    lon_range = ifelse(all(is.na(Lon_updated)), NA,
+                        max(Lon_updated, na.rm = T) - 
+                         min(Lon_updated, na.rm = T)),
+    lat_range = ifelse(all(is.na(Lat_updated)), NA,
+                        max(Lat_updated, na.rm = T) - 
+                         min(Lat_updated, na.rm = T)),
+    coordinates_equal = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                               lon_range == 0 & lat_range == 0),
+    coordinates_consistent = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                                    lon_range < threshold & 
+                                      lat_range < threshold)
+  ) %>%
+  ungroup() %>%
+  select(-lon_range, -lat_range)
+```
+
+See if count of rows in db_resurv_updated where different ReSurvey observations within the same plot have different coordinates matches count in Ilona's file, and keep cases where row count is different.
+
+```{r}
+issue3_datasets_diff_counts <- db_resurv_updated %>%
+  filter(coordinates_equal == FALSE) %>%
+  group_by(RS_CODE, Dataset) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  # Add info on Ilona's file
+  full_join(
+    issue3_datasets %>% select(RS_CODE, Dataset, CountOfDataset) %>%
+      mutate(CountOfDataset = as.integer(CountOfDataset))
+  ) %>%
+  # Keep records where counts are different between db_resurv_updated
+  # and Ilona's file
+  filter(count != CountOfDataset)
+```
+
+```{r}
+issue3_datasets_diff_counts
+```
+
+These counts might be different because of other changes.
+
+## Different coordinates ok / not ok
+
+According to Ilona's remarks: cases where it is OK / not OK to have different coordinates for different observations of the same plot are correct (resampling, etc).
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Join issue3_datasets
+  left_join(issue3_datasets %>% select(-CountOfDataset, -remark)) %>%
+  # Create a column edit_diff_coords_ok to mark rows to update
+  mutate(edit_diff_coords_ok =
+           ifelse(
+             (coordinates_equal == FALSE | is.na(coordinates_equal)) &
+               correct == "ok", TRUE, FALSE)) %>%
+  # Create a column edit_diff_coords_not_ok to mark rows to update
+  mutate(edit_diff_coords_not_ok =
+           ifelse(
+             (coordinates_equal == FALSE | is.na(coordinates_equal)) &
+               correct == "not_ok", TRUE, FALSE)) %>%
+  # Set NA values for edit_diff_coords_ok and edit_diff_coords_not_ok as FALSE
+  mutate(edit_diff_coords_ok = ifelse(is.na(edit_diff_coords_ok),
+                                      FALSE, edit_diff_coords_ok),
+         edit_diff_coords_not_ok = ifelse(is.na(edit_diff_coords_not_ok),
+                                      FALSE, edit_diff_coords_not_ok))
+```
+
+We have to correct those records where correct == "to_correct" based on Ilona's files or on info on "200_Issue3_datasets.xlsx".
+
+## Correct coordinates
+
+Which ones to correct?
+
+```{r}
+db_resurv_updated %>% filter(correct == "to_correct") %>%
+  distinct(RS_CODE, Dataset, `ReSurvey project`) %>% arrange(RS_CODE)
+```
+
+### CZ_0001
+
+Read the file in the edited folder.
+
+```{r}
+issue3_CZ_0001 <- read_tsv(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "Issue3_CZ_0001_corrected.txt"))
+```
+Need to update Longitude, Latitude and `Location uncertainty (m)` (I guess this is coded as PRECISION).
+
+Ilona: Please mind that CZ files (all resurvey datasets with rs_codes that begins with “CZ” have special format of coordinates not decimal degrees but DDMMSS.SS).
+
+We need to onvert coordinates to decimal degrees.
+
+Function to convet DDMMSS format to decimal degrees:
+
+```{r}
+convert_to_decimal <- function(ddmmss) {
+  # Convert to character to handle the data as strings
+  ddmmss <- as.character(ddmmss)
+  
+  # Extract the degree, minute, and second parts
+  if (nchar(ddmmss) == 6) {  # Ensure it's a 6-digit number (DDMMSS)
+    degrees <- as.numeric(substr(ddmmss, 1, 2))  # First 2 digits for degrees
+    minutes <- as.numeric(substr(ddmmss, 3, 4))  # Next 2 digits for minutes
+    seconds <- as.numeric(substr(ddmmss, 5, 6))  # Last 2 digits for seconds
+  } else {
+    return(NA)  # Return NA if the format doesn't match expected
+  }
+  
+  # Convert to decimal degrees
+  decimal_degrees <- degrees + (minutes / 60) + (seconds / 3600)
+  
+  return(decimal_degrees)
+}
+```
+
+Apply the conversion function to the longitude and latitude columns:
+
+```{r}
+issue3_CZ_0001 <- issue3_CZ_0001 %>%
+  mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
+         LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
+```
+
+
+Number of rows in issue3_CZ_0001 = number of rows in db with that RS_CODE:
+
+```{r}
+nrow(issue3_CZ_0001)
+nrow(db_resurv_updated %>% filter(RS_CODE == "CZ_0001"))
+```
+
+Update db_resurv_updated only for cases where RS_CODE == "CZ_0001".
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0001") %>%
+  # Join with issue3_CZ_0001 based on PlotObservationID
+  left_join(issue3_CZ_0001 %>%
+              select(PlotObservationID, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
+    ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+### CZ_0005
+
+```{r}
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0005" & coordinates_equal == FALSE))
+```
+
+Ilona's remark: the last observation of this plot was corrected same coordinates as all other observations.
+
+```{r}
+db_resurv_updated %>%
+  filter(RS_CODE == "CZ_0005" & coordinates_equal == FALSE) %>%
+  select(RS_CODE, `ReSurvey plot`, `ReSurvey observation`, Longitude, Latitude)
+```
+
+Get values of longitude and latitude from all other observations to correct the last observation of this plot:
+
+```{r}
+longitude <- as.numeric(
+  db_resurv_updated %>%
+    filter(RS_CODE == "CZ_0005" & coordinates_equal == FALSE) %>%
+    select(RS_CODE, `ReSurvey plot`, `ReSurvey observation`, Longitude, Latitude) %>%
+    mutate(`ReSurvey observation` = as.numeric(`ReSurvey observation`)) %>%
+    filter(`ReSurvey observation` == min(`ReSurvey observation`)) %>%
+    select(Longitude)
+  )
+
+latitude <- as.numeric(
+  db_resurv_updated %>%
+    filter(RS_CODE == "CZ_0005" & coordinates_equal == FALSE) %>%
+    select(RS_CODE, `ReSurvey plot`, `ReSurvey observation`, Longitude, Latitude) %>%
+    mutate(`ReSurvey observation` = as.numeric(`ReSurvey observation`)) %>%
+    filter(`ReSurvey observation` == min(`ReSurvey observation`)) %>%
+    select(Latitude)
+)
+```
+
+Correct the last observation of this plot:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark the row to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0005" & coordinates_equal == FALSE &
+           `ReSurvey observation` == 2021) %>%
+  # Update Longitude and Latitude with the values above if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, longitude, Longitude),
+    Latitude = if_else(UpdateFlag, latitude, Latitude)
+    ) %>%
+  # Create a column edit_coords to mark the row to update
+  mutate(edit_coords = RS_CODE == "CZ_0005" & coordinates_equal == FALSE &
+           `ReSurvey observation` == 2021) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### HERE: CZ_0019_002
+
+### CZ_0019_041 (new file from Ilona)
+
+Wait for response, but seems that coordinates of plot LOUCKY4 need to be changed to equal others (but all plots have the same coordinates!).
+
+```{r}
+data.frame(db_resurv_updated %>%
+             filter(RS_CODE == "CZ_0019_041") %>%
+             select(RS_CODE, Dataset, `ReSurvey project`, `ReSurvey plot`,
+                    Longitude, Latitude) %>%
+             arrange(`ReSurvey plot`))
+```
+
+# TO DO: Remove "correct" column
+
+# TO DO: Reupdate coordinates
+
+# TO DO: Recalculate coordinates_equal and coordinates_consistent
+
+# PROBABLY BAD FROM HERE
+
+```{r}
+db_updated <- db_updated %>%
+  
+  
+  
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        RS_CODE == "AT_0009" & Dataset == "Austria_VINCA",
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        RS_CODE == "CZ_0011" & Dataset == "CZ11_SWMoraviaAcidGrass",
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        RS_CODE == "CZ_0011" & Dataset == "Czechia_nvd",
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        RS_CODE == "CZ_0016" & Dataset == "CZ16_ObranskaStran",
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        HERE,
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        HERE,
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        HERE,
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        HERE,
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    ) %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        HERE,
+      "Different coordinates for different obs of same plot OK", edits_AV)
+    )
+
+
+```
+
+Cases where different coordinates for different observations of the same plot are not correct:
+
+```{r}
+db_updated <- db_updated %>%
+  mutate(
+    edits_AV = if_else(
+      `ReSurvey plot (Y/N)` == "Y" &
+        RS_CODE == "AT_0011" & Dataset == "AT_DonauAuen",
+      "Different coordinates for different obs of same plot not OK", edits_AV)
+    ) 
+
+
+
+```
+
+## a
+
+
+
+
+# OLD from here
+
+# Filter to get only resurveys and save db_resurv in edited data folder
+
+```{r}
+db_resurv <- db %>% filter(`ReSurvey plot (Y/N)` == "Y")
+```
+
+```{r}
+write_tsv(db_resurv,here("data", "edited","db_resurv.csv"))
+```
+
+# Filter to get "not resurveys" and save db_EVA in edited data folder
+
+```{r}
+db_EVA <- db %>%
+  filter(`ReSurvey plot (Y/N)` == "N" | is.na(`ReSurvey plot (Y/N)`))
+```
+
+```{r}
+write_tsv(db_EVA,here("data", "edited","db_EVA.csv"))
+```
+
+# Session info
+
+```{r}
+sessionInfo()
+```

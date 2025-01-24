@@ -1,4 +1,13 @@
-## -------------------------------------------------------------------------------
+---
+title: "Script to make a first check of the ReSurvey database"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Load libraries
+
+```{r}
 library(here)
 library(readr)
 library(tidyr)
@@ -8,54 +17,93 @@ library(ggplot2)
 library(stringr)
 library(purrr)
 library(readxl)
+```
 
+# Read the data
 
-## -------------------------------------------------------------------------------
-db_resurv<-read_tsv(here("data", "edited", "db_resurv.csv"))
+```{r}
+db<-read_tsv(here("data", "edited",
+                  "200_MOTIVATE20240412_header_notJUICE_with_precise_coordinates.csv"))
+```
 
+# Problems (do not affect us)
 
-## -------------------------------------------------------------------------------
-problems<-problems(db_resurv)
+```{r}
+problems<-problems(db)
 sort(unique(problems$col))
-names(db_resurv[c(7,13)])
+names(db[52:69])
+```
 
+We will not use these columns, so no problem!
 
-## -------------------------------------------------------------------------------
+# Filter to get only resurveys
+
+```{r}
+db_resurv <- db %>% filter(`ReSurvey plot (Y/N)` == "Y")
+```
+
+# Update coordinates
+
+Create new column with old coordinates if new not available, and with new if available.
+
+```{r}
 db_resurv <- db_resurv %>%
   mutate(Lon_updated = ifelse(is.na(Lon_prec),Longitude,Lon_prec),
          Lat_updated = ifelse(is.na(Lat_prec),Latitude,Lat_prec))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 print(db_resurv, width = Inf)
+```
 
+Save to csv:
 
-## -------------------------------------------------------------------------------
+```{r}
+write_csv(db_resurv,here("data", "clean","db_resurv.csv"))
+```
+
+# ISSUE 1: ReSurvey plot is NA
+
+Careful! Sometimes ReSurvey plot is NA. 
+
+```{r}
 nrow(db_resurv%>%filter(is.na(RS_CODE)))
 nrow(db_resurv%>%filter(is.na(`ReSurvey site`)))
 nrow(db_resurv%>%filter(is.na(`ReSurvey plot`)))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_resurv %>% filter(is.na(`ReSurvey plot`)),
           here("output", "csv","issue1.csv"))
+```
 
+# ISSUE 2: Coordinates are NA
 
-## -------------------------------------------------------------------------------
+Coordinates are also NA in some cases.
+
+```{r}
 nrow(db_resurv%>%filter(is.na(Lon_updated) & is.na(Lat_updated )))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_resurv %>% filter(is.na(Lon_updated) & is.na(Lat_updated)),
           here("output", "csv","issue2.csv"))
+```
 
+But Resurvey plot and coordinates are never missing at the same time.
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv%>%
        filter(is.na(`ReSurvey plot`) & is.na(Lon_updated) & is.na(Lat_updated)))
+```
 
+# ISSUE 3: Different ReSurvey observations within the same plot have different coordinates
 
-## -------------------------------------------------------------------------------
+Careful! In some cases different ReSurvey observations within the same plot have different coordinates. 
+
+Create two new columns in db_resurv: coordinates_equal indicating if coordinates are exactly equal between ReSurvey observations, and coordinates_consistent, indicating if coordinates are consistent between ReSurvey observations (consistent meaning that difference < 0.001 degrees).
+
+```{r}
 # Define a threshold (e.g., 0.001 degrees for longitude/latitude differences)
 threshold <- 0.001
 
@@ -76,14 +124,14 @@ db_resurv <- db_resurv %>%
   ) %>%
   ungroup() %>%
   select(-lon_range, -lat_range)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_resurv %>% filter(coordinates_equal==FALSE),
           here("output", "csv","issue3.csv"))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv %>% 
   group_by(RS_CODE,`ReSurvey site`, `ReSurvey plot`) %>%
   summarize(is_equal = all(coordinates_equal),
@@ -104,9 +152,13 @@ db_resurv %>%
   coord_flip() + theme(legend.position = "none")
 ggsave(filename=here("output", "figures","issue3.tiff"),
        width=10,height=7,units="cm",dpi=300)
+```
 
+# ISSUE 4: Some plots have only one resurvey
 
-## -------------------------------------------------------------------------------
+When ReSurvey plot is not NA, use the unique combination of RS_CODE, ReSurvey site and ReSurvey plot to uniquely define each ReSurvey plot (as defined in metadata). When ReSurvey plot is NA (111 rows), use the unique combination of RS_CODE, ReSurvey site and updated coordinates to uniquely define each ReSurvey plot. Check how many resurveys (i.e. different years are there for each unique combination).
+
+```{r}
 count_resurveys <- db_resurv %>%
   # Convert dates to date format and get the year
   mutate(date = dmy(`Date of recording`), year = year(date)) %>%
@@ -124,14 +176,18 @@ count_resurveys <- db_resurv %>%
     distinct_years=n_distinct(year), 
     # Get how many different dates for each unique group
     distinct_dates=n_distinct(date), .groups = "drop")
+```
 
+Summary stats:
 
-## -------------------------------------------------------------------------------
+```{r}
 summary(count_resurveys$distinct_years)
 sd(count_resurveys$distinct_years)
+```
 
+Histograms:
 
-## -------------------------------------------------------------------------------
+```{r}
 # For all data
 ggplot(count_resurveys, aes(x = distinct_years)) + 
   geom_histogram(fill = "white", color = "black", bins = 55)+
@@ -139,25 +195,29 @@ ggplot(count_resurveys, aes(x = distinct_years)) +
   ylab("Number of plots")
 ggsave(filename=here("output", "figures","issue4.tiff"),
        width=11,height=7,units="cm",dpi=300)
+```
 
+Number and proportion of plots with only 1 resurvey (should not be so!)
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(count_resurveys%>%filter(distinct_years==1))
 nrow(count_resurveys%>%filter(distinct_years==1))/nrow(count_resurveys)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(count_resurveys%>%filter(distinct_years==1),
           here("output", "csv","issue4.csv"))
+```
 
+# ISSUE 5: Datasets with only presence/absence
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv %>%
   filter(`Cover abundance scale`=="Presence/Absence") %>%
   distinct(Dataset)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv %>% 
          mutate(pres_or_ab =ifelse(`Cover abundance scale`=="Presence/Absence",
                                    "Presence/Absence", "Abundance"),
@@ -168,27 +228,69 @@ ggplot(db_resurv %>%
   labs(y = "Percentage", x = NULL)
 ggsave(filename=here("output", "figures","issue5.tiff"),
        width=12,height=7,units="cm",dpi=300)
+```
 
 
-## -------------------------------------------------------------------------------
+For DK_Naturdata_Res - info about habitat from Jerker's file (see below).
+
+# ISSUE 6: Observations with wrong country (GIS)
+
+Read text file wrong_countries obtained in ArcGIS:
+
+```{r}
 wrong_countries <- read_delim(here("data", "clean","wrong_countries.txt"),
                               delim = ";")
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(wrong_countries, here("output", "csv","issue6.csv"))
+```
 
+# ISSUE 7: Different cover abundance scales
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(`Cover abundance scale`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations", x = "Cover abundance scale") +
   coord_flip()
 ggsave(filename=here("output", "figures","issue7.tiff"),
        width=18,height=10,units="cm",dpi=300)
+```
 
+# ISSUE 8: Wrong EUNIS codes
 
-## -------------------------------------------------------------------------------
+Used this info in metadata file:
+
+Expert system classification to EUNIS habitats (https://zenodo.org/records/4812736 ; https://floraveg.eu/habitat/). 
+I am sending you legend for EUNIS classification version 2022-10-16 with all codes and meanings, directly prepared from expert system file (second sheet) - it is slightly different from published version in ZENODO (https://zenodo.org/records/4812736 , little bit old dated now) and from https://floraveg.eu/habitat/ (little bit newer than in current EVA version).
+
+Qa = mires and Qb = wetlands
+P units – in floraveg.eu there is slightly different classification (https://floraveg.eu/habitat/overview/P), but in EVA is still this classification of P:
+
+P Surface waters
+Pa Base-poor spring and spring brook
+Pb Calcareous spring and spring brook
+Pc Brackish-water vegetation
+Pd Fresh-water small pleustophyte vegetation
+Pe Fresh-water large pleustophyte vegetation
+Pf Fresh-water submerged vegetation
+Pg Fresh-water nymphaeid vegetation
+Ph Oligotrophic-water vegetation
+Pi Dystrophic-water vegetation
+Pj Stonewort vegetation 
+
+Presence of “!” simply means that for one unit there are two or more different formulas, e.g. R11 and R11!. So it is only technical stuff.
+
+Multiple assignment of relevé – no priority, alphabetical order, e.g. N16!,S66,S81 means that relevé can be assigned to all 3 units: N16 Mediterranean and Macaronesian coastal dune grassland (grey dune), S66 Mediterranean halo-nitrophilous scrub and S81 Canarian xerophytic scrub
+
+No value present in Expert System – relevé didn´t enter expert system classification (= it means that some prerequisites are missing)
+
+“~” – relevé entered expert classification however was not classified to any EUNIS unit
++
+
+Clean info on Expert system column and separate it when there are several codes.
+
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # Clean 'Expert System' column by removing "!" and replacing "~" with NA
@@ -206,17 +308,19 @@ db_resurv <- db_resurv %>%
     fill = "right",   # Fill missing values with NA for cases with fewer values
     remove = FALSE    # Keep the original 'Expert System' column
   )
+```
 
+Calculate how many different EUNIS codes have been assigned:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # Count the number of non-NA values across the EUNIS columns
     n_EUNIS = rowSums(!is.na(select(., starts_with("EUNIS"))))
   )
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -225,9 +329,11 @@ ggplot(db_resurv %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
+```
 
+Correct some EUNIS codes that are probably wrong:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(across(starts_with("EUNIS"), ~ case_when(
     . == "N16M" ~ "N16",
@@ -237,9 +343,11 @@ db_resurv <- db_resurv %>%
     . == "N15A" ~ "N15",
     TRUE ~ .
   )))
+```
 
+Add columns for the different EUNIS levels:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # EUNISa levels
@@ -314,9 +422,11 @@ db_resurv <- db_resurv %>%
       NA_character_
     )
   )
+```
 
+Create new columns with descriptions for the level 1 codes:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     EUNISa_1_descr = case_when(
@@ -368,9 +478,11 @@ db_resurv <- db_resurv %>%
       TRUE ~ NA_character_
     )
   )
+```
 
+Plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -381,47 +493,57 @@ ggplot(db_resurv %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
        x = "EUNIS level 1") + coord_flip()
 ggsave(filename=here("output", "figures","issue8.tiff"),
        width=18,height=10,units="cm",dpi=300)
+```
 
+# ISSUE 9: Manipulated plots and info on manipulation type
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(`Manipulate (y/n)`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "Manipulation")
 ggsave(filename=here("output", "figures","issue9.tiff"),
        width=10,height=8,units="cm",dpi=300)
+```
 
+List of Type of Manipulation in manipulated plots (mixed information):
 
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(data.frame(unique(db_resurv$`Type of manipulation`)),
           here("output", "csv","issue9.csv"))
+```
 
+# ISSUE 10: Location method
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(`Location method`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "Location method") + coord_flip()
 ggsave(filename=here("output", "figures","issue10.tiff"),
        width=18,height=8,units="cm",dpi=300)
+```
 
+# ISSUE 11: Resurvey project types
 
-## -------------------------------------------------------------------------------
+```{r}
 unique(db_resurv$RS_PROJTYP)
+```
 
+Unify codes:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(RS_PROJTYP = recode(RS_PROJTYP,
                              "Resampling" = "resampling",
                              "Permanent (man)" = "permanent (man)"))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 unique(db_resurv$RS_PROJTYP)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -429,21 +551,25 @@ ggplot(db_resurv, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
   theme(legend.position = "top")
 ggsave(filename=here("output", "figures","issue11.tiff"),
        width=18,height=8,units="cm",dpi=300)
+```
 
+# ISSUE 12: Column RS_DUPL
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv %>% filter(!is.na(RS_DUPL)) %>% select(RS_CODE, RS_DUPL) %>%
   distinct()
+```
 
+# ISSUE 13: Location uncertainty
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   # Redefine precision_new, which was wrong
   mutate(precision_new = factor(ifelse(is.na(Lon_prec) & is.na(Lat_prec),
                                        0, 1)))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(`Location uncertainty (m)`, fill = precision_new)) +
   geom_histogram( color = "black") +
   xlab("Location uncertainty (m)")
@@ -459,13 +585,22 @@ ggplot(db_resurv %>% filter(`Location uncertainty (m)` > 500),
   xlab("Location uncertainty (m) > 500")
 ggsave(filename=here("output", "figures","issue13_2.tiff"),
        width=18,height=8,units="cm",dpi=300)
+```
 
 
-## -------------------------------------------------------------------------------
+# NO ISSUES FROM HERE
+
+# Altitude and slope values
+
+Unique slope values:
+
+```{r}
 unique((db_resurv)$`Slope (°)`) %>% str_sort()
+```
 
+Set altitude, slope and aspect as numeric:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # Some altitude values have a "-" after the number,
@@ -478,9 +613,11 @@ db_resurv <- db_resurv %>%
     # Convert aspect values to numeric
     `Aspect (°)` = as.numeric(`Aspect (°)`)
     )
+```
 
+Histograms:
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(Altitude)) +
   geom_histogram(fill = "white", color = "black")
 ggplot(db_resurv, aes(`Aspect (°)`)) +
@@ -489,31 +626,41 @@ ggplot(db_resurv, aes(`Slope (°)`)) +
   geom_histogram(fill = "white", color = "black")
 ggsave(filename=here("output", "figures","issue8.tiff"),
        width=18,height=10,units="cm",dpi=300)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 range(db_resurv$`Slope (°)`, na.rm=T)
+```
 
+# Add columns date and year
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(date = dmy(`Date of recording`), year = year(date))
+```
 
+Histograms:
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(year)) + geom_histogram(fill = "white", color = "black")
+```
 
+# Plot size
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(`Relevé area (m²)`)) +
   geom_histogram(fill = "white", color = "black")
+```
 
+Observations with no info on plot size:
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv %>% filter(is.na(`Relevé area (m²)`)))
+```
 
+# Cover values (total, trees, shrubs, herbs, mossess)
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv %>%
   pivot_longer(cols = c(`Cover total (%)`, `Cover tree layer (%)`,
                         `Cover shrub layer (%)`, `Cover herb layer (%)`,
@@ -523,21 +670,29 @@ db_resurv %>%
   geom_histogram(fill = "white", color = "black", bins = 10) +
   facet_wrap(~ variable, scales = "free") +
   labs(x = "Value", y = "Frequency")
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv %>%
   reframe(across(c(`Cover total (%)`, `Cover tree layer (%)`,
                      `Cover shrub layer (%)`, `Cover herb layer (%)`,
                      `Cover moss layer (%)`), ~range(., na.rm = TRUE)))
+```
 
+All values OK.
 
-## -------------------------------------------------------------------------------
+# Mosses and lichens identified
+
+```{r}
 ggplot(db_resurv, aes(`Mosses identified (Y/N)`)) + geom_bar()
 ggplot(db_resurv, aes(`Lichens identified (Y/N)`)) + geom_bar()
+```
 
+NA in most cases.
 
-## -------------------------------------------------------------------------------
+# All resurveys for each resurvey plot to send to Bea
+
+```{r}
 db_Europa<- db_resurv %>%
   group_by(RS_CODE, `ReSurvey site`,
            # If ReSurvey plot is not NA, 
@@ -565,97 +720,137 @@ db_Europa<- db_resurv %>%
   select(-`Date of recording`, -date, -group_coords) %>%
   # Add unique identifiers for each observation
   mutate(obs_unique_id = row_number())
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 print(db_Europa, width = Inf)
+```
 
+Save to csv (file for us):
 
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_Europa,here("data", "clean","db_Europa_20250107.csv"))
+```
 
+Save to csv (file for Bea, with only essential info):
 
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_Europa %>% 
             select(obs_unique_id, plot_unique_id, Lon_updated, Lat_updated,
                    year),
           here("data", "clean","db_Europa_20241210_short.csv"))
+```
 
+# Info on HabitatID from DK 
 
-## -------------------------------------------------------------------------------
+Based on information got from Jesper.
+
+## Read the data sent by Jesper from DK
+
+```{r}
 db_DK_J<-read_tsv(here("data", "raw",
                        "DK_Naturdata_Res_habitat_hab_codes_Jesper",
                   "DK_Naturdata_Res_habitat_hab_codes.txt"))
+```
 
+## Add info on HabitatID to db_resurv
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   # Keeping all obs in db_resurv but not all in db_DK_J
   left_join(db_DK_J %>% select(PlotObservationID, HabitatID))
+```
 
+## List of HabitatID
 
-## -------------------------------------------------------------------------------
+```{r}
 print(db_resurv %>% distinct(HabitatID), n = 100)
+```
 
+Write csv:
 
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_resurv %>% distinct(HabitatID),
-          here("data", "clean","list_HabitatID_DK_resurv.csv"))
+          here("data", "clean","list_HabitatID_DK.csv"))
+```
 
+## Cases without HabitatID info
 
-## -------------------------------------------------------------------------------
+Cases without ESy EUNIS habitat:
+
+```{r}
 nrow(db_resurv %>% filter(is.na(`Expert System`)))/nrow(db_resurv)
+```
 
+Cases without ESy EUNIS habitat but with HabitatID from DK:
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv %>% filter(is.na(`Expert System`)&!is.na(HabitatID)))/nrow(db_resurv)
+```
 
+Cases without ESy EUNIS habitat and without HABITAT from DK:
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv %>% 
        filter(is.na(`Expert System`)&is.na(HabitatID)))/nrow(db_resurv)
+```
 
+Cases without ESy EUNIS habitat and without HabitatID from DK where data is presence / absence:
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv %>%
        filter(is.na(`Expert System`) &
                 is.na(HabitatID) &
                 `Cover abundance scale` == "Presence/Absence"))/
   nrow(db_resurv)
+```
 
+Cases without ESy EUNIS habitat and without HabitatID from DK where data is not presence / absence:
 
-## -------------------------------------------------------------------------------
+```{r}
 nrow(db_resurv %>%
        filter(is.na(`Expert System`) &
                 is.na(HabitatID) &
                 `Cover abundance scale` != "Presence/Absence"))/
   nrow(db_resurv)
+```
 
+## Change some Annex I habitat codes that were wrong
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(HabitatID = as.character(HabitatID)) %>%
   mutate(HabitatID = ifelse(HabitatID == "9998", "91D0",
                             ifelse(HabitatID == "9999", "91E0", HabitatID)))
+```
 
+# Add info on correspondences HabitatID (DK, Jesper) - EUNIS
 
-## -------------------------------------------------------------------------------
+Read correspondences file:
+
+```{r}
 correspondences<-read_excel(here("data", "edited",
                                  "correspondence_HabitatID_DK.xlsx"))
+```
 
+Add info to db_resurv:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   # Keeping all obs in db_resurv but not all in db_DK_J
   left_join(correspondences %>% select(HabitatID, EUNIS))
+```
 
+Correct NA values in EUNIS
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(EUNIS = ifelse(EUNIS == "NA", NA, EUNIS))
+```
 
+Add info on EUNIS (DK) to EUNISa:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(EUNISa =
            # If EUNIS (DK) is available, add as EUNISa
@@ -667,22 +862,28 @@ db_resurv <- db_resurv %>%
                                            "Expert system"))) %>%
   # Remove column EUNIS (DK)
   select(-EUNIS)
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(EUNIS_assignation)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS assignation")
+```
 
+## Generate file for ISSUE 5
 
-## -------------------------------------------------------------------------------
+```{r}
 write_csv(db_resurv %>%
             filter(is.na(`Expert System`)&is.na(HabitatID)),
           here("output", "csv","issue5.csv"))
+```
 
+## Update columns for EUNIS levels and descriptions
 
-## -------------------------------------------------------------------------------
+Update the columns for the different EUNISs levels:
+
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # EUNISa levels
@@ -705,9 +906,11 @@ db_resurv <- db_resurv %>%
   ) %>%
   # Remove HabitatID column
   select(-HabitatID)
+```
 
+Update columns with descriptions for the level 1 codes:
 
-## -------------------------------------------------------------------------------
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     EUNISa_1_descr = case_when(
@@ -723,17 +926,21 @@ db_resurv <- db_resurv %>%
       TRUE ~ NA_character_
     )
   )
+```
 
+## Number of different EUNIS codes
 
-## -------------------------------------------------------------------------------
+Recalculate how many different EUNIS codes have been assigned:
+
+```{r}
 db_resurv <- db_resurv %>%
   mutate(
     # Count the number of non-NA values across the EUNIS columns
     n_EUNIS = rowSums(!is.na(select(., EUNISa:EUNISd)))
   )
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -742,9 +949,11 @@ ggplot(db_resurv %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
+```
 
+New plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
 
-## -------------------------------------------------------------------------------
+```{r}
 ggplot(db_resurv, aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -753,14 +962,16 @@ ggplot(db_resurv %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 1") + coord_flip()
+```
 
+# Add info on descriptions for EUNIS levels 2-4
 
-## -------------------------------------------------------------------------------
+```{r}
 descriptions<-read_excel(here("data", "edited",
                                  "EUNIS-Habitats-2021-06-01_modified.xlsx"))
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 # Define the columns and corresponding description column names
 eunis_cols <- c("EUNISa_2", "EUNISa_3", "EUNISa_4",
                 "EUNISb_2", "EUNISb_3", "EUNISb_4", 
@@ -788,9 +999,11 @@ db_resurv <- reduce(seq_along(eunis_cols), function(data, i) {
     ) %>%
     rename(!!descr_col_names[i] := `EUNIS-2021 habitat name`)
 }, .init = db_resurv)
+```
 
+The matching did not work sometimes, correct!
 
-## -------------------------------------------------------------------------------
+```{r}
 # Correct EUNISa levels 2-4 descriptions
 db_resurv <- db_resurv %>%
   mutate(EUNISa_2_descr = 
@@ -827,9 +1040,9 @@ db_resurv <- db_resurv %>%
                     TRUE ~ NA_character_
                     ))
          )
+```
 
-
-## -------------------------------------------------------------------------------
+```{r}
 # Correct EUNISb levels 2-4 descriptions
 db_resurv <- db_resurv %>%
   mutate(EUNISb_2_descr = 
@@ -841,13 +1054,29 @@ db_resurv <- db_resurv %>%
                     TRUE ~ NA_character_)
                   )
          )
+```
 
+EUNISc and EUNISd levels 2-4 are OK.
+ 
+# Notes EUNIS codes - to change?
 
-## -------------------------------------------------------------------------------
+https://www.sci.muni.cz/botany/chytry/Schaminee_etal2021_EEA-Report-Aquatic-Wetland-habitats.pdf
+
+EUNISa_2 == "Q6" : "Periodically exposed shores"
+EUNISa_3 = "Q61" : "Periodically exposed shore with stable, eutrophic sediments with
+pioneer or ephemeral vegetation"
+EUNISa_3 == "Q62" : "Periodically exposed shore with stable, mesotrophic sediments with pioneer or ephemeral vegetation"
+
+This classification of Q + numbers is now coexisting in the database with Qa & Qb (metadata). How to proceed?
+
+```{r}
 db_resurv %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_2)
+```
 
 
-## -------------------------------------------------------------------------------
+# Plots of level-2 categories within each level 1 category
+
+```{r}
 ggplot(db_resurv %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
@@ -911,12 +1140,12 @@ ggplot(db_resurv %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
   ggtitle(db_resurv %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","V_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
+```
 
+# Session info
 
-## -------------------------------------------------------------------------------
-write_tsv(db_resurv,here("data", "clean","db_resurv_clean.csv"))
-
-
-## -------------------------------------------------------------------------------
+```{r}
 sessionInfo()
+```
+
 
