@@ -21,11 +21,47 @@ library(readxl)
 
 # Read the data
 
+## EVA
+
 ```{r}
 db_EVA<-read_tsv(here("data", "edited", "db_EVA.csv"))
 ```
 
-# Problems (do not affect us)
+Convert columns.
+
+```{r}
+db_EVA <- db_EVA %>%
+  mutate(Private = as.character(Private), RS_TIME = as.numeric(RS_TIME),
+         Lon_prec = as.numeric(Lon_prec), Lat_prec = as.numeric(Lat_prec),
+         precision_new = as.numeric(precision_new))
+```
+
+## Rows to add to EVA
+
+Rows that were initially in db_resurv but they have been corrected to ReSurvey plot (Y/N) =="N", so they belong to db_EVA and not to db_resurv
+
+```{r}
+db_add_to_EVA <- read_tsv(here("data", "clean","db_add_to_EVA.csv"))
+```
+
+Remove some columns.
+
+```{r}
+db_add_to_EVA <- db_add_to_EVA %>%
+  select(-Lon_updated, -Lat_updated, -edit_plot, -edit_coords_unc, 
+  -coordinates_equal, -coordinates_consistent, -edit_diff_coords_ok,
+  -edit_diff_coords_not_ok, -edit_coords, -correct, -edit_not_resurv)
+```
+
+Convert columns.
+
+```{r}
+db_add_to_EVA <- db_add_to_EVA %>%
+  mutate(`Nr. relevé in table` = as.character(`Nr. relevé in table`),
+         `Slope (°)` = as.character(`Slope (°)`))
+```
+
+## Problems (do not affect us)
 
 ```{r}
 problems<-problems(db_EVA)
@@ -33,19 +69,41 @@ sort(unique(problems$col))
 names(db_EVA[c(13, 42)])
 ```
 
+## Verify if column names and types are the same
+
+```{r}
+identical(colnames(db_EVA), colnames(db_add_to_EVA)) &&
+    identical(sapply(db_EVA, class), sapply(db_add_to_EVA, class))
+```
+
+## Bind EVA and rows to add
+
+Create column to label rows that were added to 
+
+```{r}
+db_EVA_updated <- db_EVA %>%
+  mutate(edit_added = FALSE)
+db_add_to_EVA <- db_add_to_EVA %>%
+  mutate(edit_added = TRUE)
+```
+
+```{r}
+db_EVA_updated <- bind_rows(db_EVA_updated, db_add_to_EVA)
+```
+
 # Update coordinates
 
 Create new column with old coordinates if new not available, and with new if available.
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   # Lon_prec y Lat_prec always NA!
   mutate(Lon_updated = ifelse(is.na(Lon_prec),Longitude,Lon_prec),
          Lat_updated = ifelse(is.na(Lat_prec),Latitude,Lat_prec))
 ```
 
 ```{r}
-print(db_EVA, width = Inf)
+print(db_EVA_updated, width = Inf)
 ```
 
 # ISSUE 2: Coordinates are NA
@@ -53,7 +111,7 @@ print(db_EVA, width = Inf)
 Coordinates are also NA in some cases.
 
 ```{r}
-nrow(db_EVA%>%filter(is.na(Lon_updated) & is.na(Lat_updated )))
+nrow(db_EVA_updated%>%filter(is.na(Lon_updated) & is.na(Lat_updated )))
 ```
 
 # Number of observations
@@ -66,13 +124,13 @@ I am not sure how to uniquely identify each plot here!
 # ISSUE 5: Datasets with only presence/absence
 
 ```{r}
-db_EVA %>%
+db_EVA_updated %>%
   filter(`Cover abundance scale`=="Presence/Absence") %>%
   distinct(Dataset)
 ```
 
 ```{r}
-ggplot(db_EVA %>% 
+ggplot(db_EVA_updated %>% 
          mutate(pres_or_ab =ifelse(`Cover abundance scale`=="Presence/Absence",
                                    "Presence/Absence", "Abundance"),
                 DK_Naturdata_Res = ifelse(Dataset == "DK_Naturdata_Res",
@@ -91,7 +149,7 @@ For DK_Naturdata_Res - info about habitat from Jerker's file (see below).
 # ISSUE 7: Different cover abundance scales
 
 ```{r}
-ggplot(db_EVA, aes(`Cover abundance scale`)) +
+ggplot(db_EVA_updated, aes(`Cover abundance scale`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "Cover abundance scale") +
@@ -134,7 +192,7 @@ No value present in Expert System – relevé didn´t enter expert system classi
 Clean info on Expert system column and separate it when there are several codes.
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # Clean 'Expert System' column by removing "!" and replacing "~" with NA
     `Expert System` = case_when(
@@ -156,7 +214,7 @@ db_EVA <- db_EVA %>%
 Calculate how many different EUNIS codes have been assigned:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # Count the number of non-NA values across the EUNIS columns
     n_EUNIS = rowSums(!is.na(select(., starts_with("EUNIS"))))
@@ -164,11 +222,11 @@ db_EVA <- db_EVA %>%
 ```
 
 ```{r}
-ggplot(db_EVA, aes(n_EUNIS)) +
+ggplot(db_EVA_updated, aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
-ggplot(db_EVA %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
+ggplot(db_EVA_updated %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
@@ -177,7 +235,7 @@ ggplot(db_EVA %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
 Correct some EUNIS codes that are probably wrong (copied from ReSurvey notebook):
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(across(starts_with("EUNIS"), ~ case_when(
     . == "N16M" ~ "N16",
     . == "Sa" ~ "V4",
@@ -191,7 +249,7 @@ db_EVA <- db_EVA %>%
 Add columns for the different EUNIS levels
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # EUNISa levels
     EUNISa_1 = substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 2, 1)),
@@ -270,7 +328,7 @@ db_EVA <- db_EVA %>%
 Add descriptions for level 1
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     EUNISa_1_descr = case_when(
       EUNISa_1 == "V" ~ "Vegetated man-made habitats",
@@ -326,11 +384,11 @@ db_EVA <- db_EVA %>%
 Plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
 
 ```{r}
-ggplot(db_EVA, aes(EUNISa_1_descr)) +
+ggplot(db_EVA_updated, aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "EUNIS level 1") + coord_flip()
-ggplot(db_EVA %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
+ggplot(db_EVA_updated %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "EUNIS level 1") + coord_flip()
@@ -343,7 +401,7 @@ EUNIS1_codes <- c("V", "U", "T", "S", "R", "Q", "P", "N", "MA")
 ```
 
 ```{r}
-db_EVA %>%
+db_EVA_updated %>%
   select(all_of(c("EUNISa_1", "EUNISb_1", "EUNISc_1", "EUNISd_1"))) %>%
   pivot_longer(everything(), names_to = "column", values_to = "value") %>%
   filter(!is.na(value)) %>%
@@ -362,7 +420,7 @@ All level 1 values are valid.
 # ISSUE 9: Manipulated plots and info on manipulation type
 
 ```{r}
-ggplot(db_EVA, aes(`Manipulate (y/n)`)) +
+ggplot(db_EVA_updated, aes(`Manipulate (y/n)`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "Manipulation")
@@ -371,13 +429,13 @@ ggplot(db_EVA, aes(`Manipulate (y/n)`)) +
 List of Type of Manipulation (mixed information), supposedly no manipulated plots here (!?):
 
 ```{r}
-unique(db_EVA$`Type of manipulation`)
+unique(db_EVA_updated$`Type of manipulation`)
 ```
 
 # ISSUE 10: Location method
 
 ```{r}
-ggplot(db_EVA, aes(`Location method`)) +
+ggplot(db_EVA_updated, aes(`Location method`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "Location method") + coord_flip()
@@ -386,11 +444,25 @@ ggplot(db_EVA, aes(`Location method`)) +
 # ISSUE 11: Resurvey project types
 
 ```{r}
-unique(db_EVA$RS_PROJTYP)
+unique(db_EVA_updated$RS_PROJTYP)
+```
+
+Unify codes for ReSurvey project types.
+
+```{r}
+db_EVA_updated <- db_EVA_updated %>%
+  # Create a column edit_RS_PROJTYP to mark rows to update
+  mutate(edit_RS_PROJTYP = RS_PROJTYP == "Resampling" |
+           RS_PROJTYP == "Permanent (man)") %>%
+  mutate(
+    RS_PROJTYP = str_replace(RS_PROJTYP, "^Resampling$", "resampling"), 
+    RS_PROJTYP = str_replace(RS_PROJTYP, 
+                             "^Permanent \\(man\\)$", "permanent (man)")
+    )
 ```
 
 ```{r}
-ggplot(db_EVA, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
+ggplot(db_EVA_updated, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (without ReSurvey) observations",
        x = "Resurvey project type") + coord_flip() +
@@ -400,21 +472,21 @@ ggplot(db_EVA, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
 # ISSUE 13: Location uncertainty
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   # Redefine precision_new, which was wrong
   mutate(precision_new = factor(ifelse(is.na(Lon_prec) & is.na(Lat_prec),
                                        0, 1)))
 ```
 
 ```{r}
-ggplot(db_EVA, aes(`Location uncertainty (m)`, fill = precision_new)) +
+ggplot(db_EVA_updated, aes(`Location uncertainty (m)`, fill = precision_new)) +
   geom_histogram( color = "black") +
   xlab("Location uncertainty (m)")
-ggplot(db_EVA %>% filter(`Location uncertainty (m)` <= 500),
+ggplot(db_EVA_updated %>% filter(`Location uncertainty (m)` <= 500),
        aes(`Location uncertainty (m)`, fill = precision_new)) +
   geom_histogram(color = "black") +
   xlab("Location uncertainty (m) <= 500")
-ggplot(db_EVA %>% filter(`Location uncertainty (m)` > 500),
+ggplot(db_EVA_updated %>% filter(`Location uncertainty (m)` > 500),
        aes(`Location uncertainty (m)`, fill = precision_new)) +
   geom_histogram(color = "black") +
   xlab("Location uncertainty (m) > 500")
@@ -428,13 +500,13 @@ ggplot(db_EVA %>% filter(`Location uncertainty (m)` > 500),
 Unique slope values:
 
 ```{r}
-unique((db_EVA)$`Slope (°)`) %>% str_sort()
+unique((db_EVA_updated)$`Slope (°)`) %>% str_sort()
 ```
 
 Set altitude, slope and aspect as numeric:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # Some altitude values have a "-" after the number,
     # convert to numeric after removing that
@@ -451,48 +523,48 @@ db_EVA <- db_EVA %>%
 Histograms:
 
 ```{r}
-ggplot(db_EVA, aes(Altitude)) +
+ggplot(db_EVA_updated, aes(Altitude)) +
   geom_histogram(fill = "white", color = "black")
-ggplot(db_EVA, aes(`Aspect (°)`)) +
+ggplot(db_EVA_updated, aes(`Aspect (°)`)) +
   geom_histogram(fill = "white", color = "black")
-ggplot(db_EVA, aes(`Slope (°)`)) +
+ggplot(db_EVA_updated, aes(`Slope (°)`)) +
   geom_histogram(fill = "white", color = "black")
 ```
 
 ```{r}
-range(db_EVA$`Slope (°)`, na.rm=T)
+range(db_EVA_updated$`Slope (°)`, na.rm=T)
 ```
 
 # Add columns date and year
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(date = dmy(`Date of recording`), year = year(date))
 ```
 
 Histograms:
 
 ```{r}
-ggplot(db_EVA, aes(year)) + geom_histogram(fill = "white", color = "black")
+ggplot(db_EVA_updated, aes(year)) + geom_histogram(fill = "white", color = "black")
 ```
 
 # Plot size
 
 ```{r}
-ggplot(db_EVA, aes(`Relevé area (m²)`)) +
+ggplot(db_EVA_updated, aes(`Relevé area (m²)`)) +
   geom_histogram(fill = "white", color = "black")
 ```
 
 Observations with no info on plot size:
 
 ```{r}
-nrow(db_EVA %>% filter(is.na(`Relevé area (m²)`)))
+nrow(db_EVA_updated %>% filter(is.na(`Relevé area (m²)`)))
 ```
 
 # Cover values (total, trees, shrubs, herbs, mossess)
 
 ```{r}
-db_EVA %>%
+db_EVA_updated %>%
   pivot_longer(cols = c(`Cover total (%)`, `Cover tree layer (%)`,
                         `Cover shrub layer (%)`, `Cover herb layer (%)`,
                         `Cover moss layer (%)`),
@@ -504,7 +576,7 @@ db_EVA %>%
 ```
 
 ```{r}
-db_EVA %>%
+db_EVA_updated %>%
   reframe(across(c(`Cover total (%)`, `Cover tree layer (%)`,
                      `Cover shrub layer (%)`, `Cover herb layer (%)`,
                      `Cover moss layer (%)`), ~range(., na.rm = TRUE)))
@@ -515,8 +587,8 @@ All values OK.
 # Mosses and lichens identified
 
 ```{r}
-ggplot(db_EVA, aes(`Mosses identified (Y/N)`)) + geom_bar()
-ggplot(db_EVA, aes(`Lichens identified (Y/N)`)) + geom_bar()
+ggplot(db_EVA_updated, aes(`Mosses identified (Y/N)`)) + geom_bar()
+ggplot(db_EVA_updated, aes(`Lichens identified (Y/N)`)) + geom_bar()
 ```
 
 NA in most cases.
@@ -533,24 +605,24 @@ db_DK_J<-read_tsv(here("data", "raw",
                   "DK_Naturdata_Res_habitat_hab_codes.txt"))
 ```
 
-## Add info on HabitatID to db_EVA
+## Add info on HabitatID to db_EVA_updated
 
 ```{r}
-db_EVA <- db_EVA %>%
-  # Keeping all obs in db_EVA but not all in db_DK_J
+db_EVA_updated <- db_EVA_updated %>%
+  # Keeping all obs in db_EVA_updated but not all in db_DK_J
   left_join(db_DK_J %>% select(PlotObservationID, HabitatID))
 ```
 
 ## List of HabitatID
 
 ```{r}
-print(db_EVA %>% distinct(HabitatID), n = 100)
+print(db_EVA_updated %>% distinct(HabitatID), n = 100)
 ```
 
 Write csv:
 
 ```{r}
-write_csv(db_EVA %>% distinct(HabitatID),
+write_csv(db_EVA_updated %>% distinct(HabitatID),
           here("data", "clean","list_HabitatID_DK_EVA.csv"))
 ```
 
@@ -559,46 +631,46 @@ write_csv(db_EVA %>% distinct(HabitatID),
 Cases without ESy EUNIS habitat:
 
 ```{r}
-nrow(db_EVA %>% filter(is.na(`Expert System`)))/nrow(db_EVA)
+nrow(db_EVA_updated %>% filter(is.na(`Expert System`)))/nrow(db_EVA_updated)
 ```
 
 Cases without ESy EUNIS habitat but with HabitatID from DK:
 
 ```{r}
-nrow(db_EVA %>% filter(is.na(`Expert System`)&!is.na(HabitatID)))/nrow(db_EVA)
+nrow(db_EVA_updated %>% filter(is.na(`Expert System`)&!is.na(HabitatID)))/nrow(db_EVA_updated)
 ```
 
 Cases without ESy EUNIS habitat and without HABITAT from DK:
 
 ```{r}
-nrow(db_EVA %>% 
-       filter(is.na(`Expert System`)&is.na(HabitatID)))/nrow(db_EVA)
+nrow(db_EVA_updated %>% 
+       filter(is.na(`Expert System`)&is.na(HabitatID)))/nrow(db_EVA_updated)
 ```
 
 Cases without ESy EUNIS habitat and without HabitatID from DK where data is presence / absence:
 
 ```{r}
-nrow(db_EVA %>%
+nrow(db_EVA_updated %>%
        filter(is.na(`Expert System`) &
                 is.na(HabitatID) &
                 `Cover abundance scale` == "Presence/Absence"))/
-  nrow(db_EVA)
+  nrow(db_EVA_updated)
 ```
 
 Cases without ESy EUNIS habitat and without HabitatID from DK where data is not presence / absence:
 
 ```{r}
-nrow(db_EVA %>%
+nrow(db_EVA_updated %>%
        filter(is.na(`Expert System`) &
                 is.na(HabitatID) &
                 `Cover abundance scale` != "Presence/Absence"))/
-  nrow(db_EVA)
+  nrow(db_EVA_updated)
 ```
 
 ## Change some Annex I habitat codes that were wrong
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(HabitatID = as.character(HabitatID)) %>%
   mutate(HabitatID = ifelse(HabitatID == "9998", "91D0",
                             ifelse(HabitatID == "9999", "91E0", HabitatID)))
@@ -613,25 +685,25 @@ correspondences<-read_excel(here("data", "edited",
                                  "correspondence_HabitatID_DK.xlsx"))
 ```
 
-Add info to db_EVA:
+Add info to db_EVA_updated:
 
 ```{r}
-db_EVA <- db_EVA %>%
-  # Keeping all obs in db_EVA but not all in db_DK_J
+db_EVA_updated <- db_EVA_updated %>%
+  # Keeping all obs in db_EVA_updated but not all in db_DK_J
   left_join(correspondences %>% select(HabitatID, EUNIS))
 ```
 
 Correct NA values in EUNIS
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(EUNIS = ifelse(EUNIS == "NA", NA, EUNIS))
 ```
 
 Add info on EUNIS (DK) to EUNISa:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(EUNISa =
            # If EUNIS (DK) is available, add as EUNISa
            ifelse(!is.na(EUNIS), EUNIS, 
@@ -645,7 +717,7 @@ db_EVA <- db_EVA %>%
 ```
 
 ```{r}
-ggplot(db_EVA, aes(EUNIS_assignation)) +
+ggplot(db_EVA_updated, aes(EUNIS_assignation)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (not ReSurvey) observations",
        x = "EUNIS assignation")
@@ -657,7 +729,7 @@ ggplot(db_EVA, aes(EUNIS_assignation)) +
 Update the columns for the different EUNISs levels:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # EUNISa levels
     EUNISa_1 = substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 2, 1)),
@@ -684,7 +756,7 @@ db_EVA <- db_EVA %>%
 Update columns with descriptions for the level 1 codes:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     EUNISa_1_descr = case_when(
       EUNISa_1 == "V" ~ "Vegetated man-made habitats",
@@ -706,7 +778,7 @@ db_EVA <- db_EVA %>%
 Recalculate how many different EUNIS codes have been assigned:
 
 ```{r}
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(
     # Count the number of non-NA values across the EUNIS columns
     n_EUNIS = rowSums(!is.na(select(., EUNISa:EUNISd)))
@@ -714,11 +786,11 @@ db_EVA <- db_EVA %>%
 ```
 
 ```{r}
-ggplot(db_EVA, aes(n_EUNIS)) +
+ggplot(db_EVA_updated, aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (not ReSurvey) observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
-ggplot(db_EVA %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
+ggplot(db_EVA_updated %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (not ReSurvey) observations",
        x = "Number of differnt EUNIS codes assigned") + coord_flip()
@@ -727,11 +799,11 @@ ggplot(db_EVA %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
 New plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
 
 ```{r}
-ggplot(db_EVA, aes(EUNISa_1_descr)) +
+ggplot(db_EVA_updated, aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (not ReSurvey) observations",
        x = "EUNIS level 1") + coord_flip()
-ggplot(db_EVA %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
+ggplot(db_EVA_updated %>% filter(!is.na(EUNISa_1_descr)), aes(EUNISa_1_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of EVA (not ReSurvey) observations",
        x = "EUNIS level 1") + coord_flip()
@@ -755,7 +827,7 @@ eunis_cols <- c("EUNISa_2", "EUNISa_3", "EUNISa_4",
 descr_col_names <- paste0(eunis_cols, "_descr")
 
 # Use reduce to loop through the columns and join dynamically based on level
-db_EVA <- reduce(seq_along(eunis_cols), function(data, i) {
+db_EVA_updated <- reduce(seq_along(eunis_cols), function(data, i) {
   # Extract level number from the column name (e.g., EUNISa_2 -> 2)
   level <- as.numeric(gsub("\\D", "", eunis_cols[i]))
   
@@ -771,14 +843,14 @@ db_EVA <- reduce(seq_along(eunis_cols), function(data, i) {
       by = setNames("EUNIS 2020 code", eunis_cols[i])
     ) %>%
     rename(!!descr_col_names[i] := `EUNIS-2021 habitat name`)
-}, .init = db_EVA)
+}, .init = db_EVA_updated)
 ```
 
 The matching did not work sometimes, correct!
 
 ```{r}
 # Correct EUNISa levels 2-4 descriptions
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(EUNISa_2_descr = 
            ifelse(!is.na(EUNISa_2_descr), EUNISa_2_descr,
                   case_when(
@@ -817,7 +889,7 @@ db_EVA <- db_EVA %>%
 
 ```{r}
 # Correct EUNISb levels 2-4 descriptions
-db_EVA <- db_EVA %>%
+db_EVA_updated <- db_EVA_updated %>%
   mutate(EUNISb_2_descr = 
            ifelse(!is.na(EUNISb_2_descr), EUNISb_2_descr,
                   case_when(
@@ -843,74 +915,74 @@ EUNISa_3 == "Q62" : "Periodically exposed shore with stable, mesotrophic sedimen
 This classification of Q + numbers is now coexisting in the database with Qa & Qb (metadata). How to proceed?
 
 ```{r}
-db_EVA %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_2)
+db_EVA_updated %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_2)
 ```
 
 
 # Plots of level-2 categories within each level 1 category
 
 ```{r}
-ggplot(db_EVA %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "MA") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "MA") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","MA_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "N"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "N"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "N") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "N") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","N_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "P"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "P"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "P") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "P") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","P_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "Q"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "Q"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","Q_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "R"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "R"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "R") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "R") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","R_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "S"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "S"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "S") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "S") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","S_level2.tiff"),
        width=16,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "T"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "T"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "T") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "T") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","T_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "U"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "U"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "U") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "U") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","U_level2.tiff"),
        width=16,height=8,units="cm",dpi=300)
-ggplot(db_EVA %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
+ggplot(db_EVA_updated %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
          geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
   labs(y = "Percentage of ReSurvey observations",
        x = "EUNIS level 2") + coord_flip() +
-  ggtitle(db_EVA %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
+  ggtitle(db_EVA_updated %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
 ggsave(filename=here("output", "figures","V_level2.tiff"),
        width=14,height=8,units="cm",dpi=300)
 ```
@@ -920,7 +992,7 @@ ggsave(filename=here("output", "figures","V_level2.tiff"),
 Save so-far clean datafile for EVA database (not resurveys):
 
 ```{r}
-write_tsv(db_EVA,here("data", "clean","db_EVA_clean.csv"))
+write_tsv(db_EVA_updated,here("data", "clean","db_EVA_updated_clean.csv"))
 ```
 
 # Session info

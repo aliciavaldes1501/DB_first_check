@@ -13,6 +13,9 @@ library(dplyr)
 library(here)
 library(readxl)
 library(stringr)
+library(tidyverse)
+library(sf)
+library(rnaturalearth)
 ```
 
 # Read the data
@@ -37,12 +40,53 @@ Create new column with old coordinates if new not available, and with new if ava
 
 ```{r}
 db_resurv <- db_resurv %>%
-  mutate(Lon_updated = ifelse(is.na(Lon_prec),Longitude,Lon_prec),
-         Lat_updated = ifelse(is.na(Lat_prec),Latitude,Lat_prec))
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec))
 ```
 
 ```{r}
 print(db_resurv, width = Inf)
+```
+
+
+# Barplot of coordinate status
+
+```{r}
+# Define a threshold (e.g., 0.001 degrees for longitude/latitude differences)
+threshold <- 0.001
+db_resurv %>% 
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  mutate(
+    lon_range = ifelse(all(is.na(Lon_updated)), NA,
+                        max(Lon_updated, na.rm = T) - 
+                         min(Lon_updated, na.rm = T)),
+    lat_range = ifelse(all(is.na(Lat_updated)), NA,
+                        max(Lat_updated, na.rm = T) - 
+                         min(Lat_updated, na.rm = T)),
+    coordinates_equal = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                               lon_range == 0 & lat_range == 0),
+    coordinates_consistent = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                                    lon_range < threshold & 
+                                      lat_range < threshold)
+  ) %>%
+  ungroup() %>%
+  group_by(RS_CODE,`ReSurvey site`, `ReSurvey plot`) %>%
+  summarize(is_equal = all(coordinates_equal),
+            is_consistent = all(coordinates_consistent),
+            .groups = "drop") %>%
+  mutate(coordinate_status = case_when(
+    is_equal ~ "Equal",
+    !is_equal & is_consistent ~ "Consistent (< 0.001º)",
+    !is_equal & !is_consistent ~ "Inconsistent (> 0.001º)")) %>%
+  count(coordinate_status)%>%
+  mutate(percentage = n / sum(n) * 100) %>%
+  ggplot(aes(x = percentage, y = coordinate_status, fill = coordinate_status)) +
+  geom_bar(stat = "identity") + 
+  geom_text(aes(label = paste0(round(percentage, 1), "%")),
+            position = position_stack(vjust = 0.5), size = 3) + 
+  labs(x = "Percentage of Plots", y = NULL) +
+  theme(axis.text.y = element_text(size = 12)) +
+  coord_flip() + theme(legend.position = "none")
 ```
 
 # Correction ISSUE 1
@@ -92,7 +136,7 @@ correction1 <- correction1 %>%
   mutate(RS_DUPL = as.character(RS_DUPL))
 ```
 
-Update db_resurv only for cases where `ReSurvey plot` is NA.
+Update db_resurv only for cases where ReSurvey plot is NA.
 
 ```{r}
 db_resurv_updated <- db_resurv %>%
@@ -109,7 +153,7 @@ db_resurv_updated <- db_resurv %>%
   select(-`ReSurvey plot.new`)
 ```
 
-Check that there are no rows with `ReSurvey plot` as NA.
+Check that there are no rows with ReSurvey plot as NA.
 
 ```{r}
 nrow(db_resurv_updated %>% filter(is.na(`ReSurvey plot`)))
@@ -144,7 +188,7 @@ correction2a <- read_excel(
 print(correction2a, width = Inf)
 ```
 
-Need to update Longitude, Latitude and `Location uncertainty (m)`.
+Need to update Longitude, Latitude and Location uncertainty (m).
 
 ```{r}
 db_resurv_updated <- db_resurv_updated %>%
@@ -199,7 +243,7 @@ correction2b <- read_excel(
 print(correction2b, width = Inf)
 ```
 
-Need to update Longitude, Latitude and `Location uncertainty (m)` (I guess this is coded as PRECISION).
+Need to update Longitude, Latitude and Location uncertainty (m) (I guess this is coded as PRECISION).
 
 ```{r}
 nrow(correction2b)
@@ -283,7 +327,7 @@ Based on the info in the "remark" column in 200_Issue3_datasets.xlsx", I created
 
 I will use this info to update the edits_AV column.
 
-Read the file in the edited folder.
+Read the file in the edited data folder.
 
 ```{r}
 issue3_datasets <- read_excel(
@@ -341,7 +385,7 @@ These counts might be different because of other changes.
 
 ## Different coordinates ok / not ok
 
-According to Ilona's remarks: cases where it is OK / not OK to have different coordinates for different observations of the same plot are correct (resampling, etc).
+According to Ilona's remarks: cases where it is OK / not OK to have different coordinates for different observations of the same plot (OK when resampling, etc).
 
 ```{r}
 db_resurv_updated <- db_resurv_updated %>%
@@ -377,20 +421,20 @@ db_resurv_updated %>% filter(correct == "to_correct") %>%
 
 ### CZ_0001
 
-Read the file in the edited folder.
+Read the file in the raw data folder.
 
 ```{r}
 issue3_CZ_0001 <- read_tsv(
   here("data", "raw", "Data_corrections_Ilona", "Issue3",
        "Issue3_CZ_0001_corrected.txt"))
 ```
-Need to update Longitude, Latitude and `Location uncertainty (m)` (I guess this is coded as PRECISION).
+Need to update Longitude, Latitude and Location uncertainty (m) (I guess this is coded as PRECISION).
 
 Ilona: Please mind that CZ files (all resurvey datasets with rs_codes that begins with “CZ” have special format of coordinates not decimal degrees but DDMMSS.SS).
 
-We need to onvert coordinates to decimal degrees.
+We need to convert coordinates to decimal degrees.
 
-Function to convet DDMMSS format to decimal degrees:
+Function to convert DDMMSS.SS format to decimal degrees:
 
 ```{r}
 convert_to_decimal <- function(ddmmss) {
@@ -398,10 +442,11 @@ convert_to_decimal <- function(ddmmss) {
   ddmmss <- as.character(ddmmss)
   
   # Extract the degree, minute, and second parts
-  if (nchar(ddmmss) == 6) {  # Ensure it's a 6-digit number (DDMMSS)
+  if (nchar(ddmmss) >= 6) {  # Ensure it's at least 6 characters long (DDMMSS)
     degrees <- as.numeric(substr(ddmmss, 1, 2))  # First 2 digits for degrees
     minutes <- as.numeric(substr(ddmmss, 3, 4))  # Next 2 digits for minutes
-    seconds <- as.numeric(substr(ddmmss, 5, 6))  # Last 2 digits for seconds
+    # Rest for seconds (including decimals if any)
+    seconds <- as.numeric(substr(ddmmss, 5, nchar(ddmmss)))
   } else {
     return(NA)  # Return NA if the format doesn't match expected
   }
@@ -420,7 +465,6 @@ issue3_CZ_0001 <- issue3_CZ_0001 %>%
   mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
          LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
 ```
-
 
 Number of rows in issue3_CZ_0001 = number of rows in db with that RS_CODE:
 
@@ -509,132 +553,2236 @@ db_resurv_updated <- db_resurv_updated %>%
   select(-UpdateFlag)
 ```
 
-### HERE: CZ_0019_002
+### CZ_0019
 
-### CZ_0019_041 (new file from Ilona)
-
-Wait for response, but seems that coordinates of plot LOUCKY4 need to be changed to equal others (but all plots have the same coordinates!).
+Read the file in the raw data folder.
 
 ```{r}
-data.frame(db_resurv_updated %>%
-             filter(RS_CODE == "CZ_0019_041") %>%
-             select(RS_CODE, Dataset, `ReSurvey project`, `ReSurvey plot`,
-                    Longitude, Latitude) %>%
-             arrange(`ReSurvey plot`))
+issue3_CZ_0019 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "CZ_0019_corrected.xlsx"))
 ```
 
-# TO DO: Remove "correct" column
+Need to update Longitude, Latitude and Location uncertainty (m) (I guess this is coded as PRECISION).
 
-# TO DO: Reupdate coordinates
+Ilona: Please mind that CZ files (all resurvey datasets with rs_codes that begins with “CZ” have special format of coordinates not decimal degrees but DDMMSS.SS).
 
-# TO DO: Recalculate coordinates_equal and coordinates_consistent
+We need to convert coordinates to decimal degrees.
 
-# PROBABLY BAD FROM HERE
+Apply the conversion function to the longitude and latitude columns:
 
 ```{r}
-db_updated <- db_updated %>%
-  
-  
-  
+issue3_CZ_0019 <- issue3_CZ_0019 %>%
+  mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
+         LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
+```
+
+#### CZ_0019_002
+
+```{r}
+nrow(issue3_CZ_0019 %>% filter(RS_CODE == "CZ_0019_002"))
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_002" & coordinates_equal == FALSE))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_002" & coordinates_equal == FALSE) %>%
+  # Join with issue3_CZ_0019 based on RELEVE_NR
+  left_join(issue3_CZ_0019 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        RS_CODE == "AT_0009" & Dataset == "Austria_VINCA",
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_013
+
+```{r}
+nrow(issue3_CZ_0019 %>% filter(RS_CODE == "CZ_0019_013"))
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_013"))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_013") %>%
+  # Join with issue3_CZ_0019 based on RELEVE_NR
+  left_join(issue3_CZ_0019 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        RS_CODE == "CZ_0011" & Dataset == "CZ11_SWMoraviaAcidGrass",
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_019
+
+```{r}
+issue3_CZ_0019 %>% filter(RS_CODE == "CZ_0019_019")
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_019" & coordinates_equal == FALSE &
+                `TV2 relevé number` == 907358))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_019" & coordinates_equal == FALSE &
+                `TV2 relevé number` == 907358) %>%
+  # Join with issue3_CZ_0019 based on RELEVE_NR
+  left_join(issue3_CZ_0019 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        RS_CODE == "CZ_0011" & Dataset == "Czechia_nvd",
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_034
+
+```{r}
+nrow(issue3_CZ_0019 %>% filter(RS_CODE == "CZ_0019_034"))
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_034"))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_034") %>%
+  # Join with issue3_CZ_0019 based on RELEVE_NR
+  left_join(issue3_CZ_0019 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        RS_CODE == "CZ_0016" & Dataset == "CZ16_ObranskaStran",
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_035
+
+```{r}
+nrow(issue3_CZ_0019 %>% filter(RS_CODE == "CZ_0019_035"))
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_035"))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_035") %>%
+  # Join with issue3_CZ_0019 based on RELEVE_NR
+  left_join(issue3_CZ_0019 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        HERE,
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_041
+
+Read the file in the raw data folder.
+
+```{r}
+issue3_CZ_0019_041 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "CZ_0019_041_corrected.xlsx"))
+```
+
+Need to update Longitude, Latitude and Location uncertainty (m) (I guess this is coded as PRECISION).
+
+Ilona: Please mind that CZ files (all resurvey datasets with rs_codes that begins with “CZ” have special format of coordinates not decimal degrees but DDMMSS.SS).
+
+We need to convert coordinates to decimal degrees.
+
+Apply the conversion function to the longitude and latitude columns:
+
+```{r}
+issue3_CZ_0019_041 <- issue3_CZ_0019_041 %>%
+  mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
+         LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
+```
+
+```{r}
+nrow(issue3_CZ_0019_041)
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_041" & coordinates_equal == FALSE))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_041" & coordinates_equal == FALSE) %>%
+  # Join with issue3_CZ_0019_041 based on RELEVE_NR
+  left_join(issue3_CZ_0019_041 %>%
+              select(RELEVE_NR, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION),
+            join_by(`TV2 relevé number` == RELEVE_NR)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        HERE,
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+#### CZ_0019_048
+
+Read the file in the raw data folder.
+
+```{r}
+issue3_CZ_0019_048 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "CZ_0019_048_corrected.xlsx"))
+```
+
+Need to update Longitude, Latitude and Location uncertainty (m) (I guess this is coded as PRECISION).
+
+Ilona: Please mind that CZ files (all resurvey datasets with rs_codes that begins with “CZ” have special format of coordinates not decimal degrees but DDMMSS.SS).
+
+We need to convert coordinates to decimal degrees.
+
+Apply the conversion function to the longitude and latitude columns:
+
+```{r}
+issue3_CZ_0019_048 <- issue3_CZ_0019_048 %>%
+  mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
+         LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
+```
+
+```{r}
+nrow(issue3_CZ_0019_048)
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0019_048" & coordinates_equal == FALSE))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0019_048" & coordinates_equal == FALSE) %>%
+  # Join with issue3_CZ_0019_048 based on PlotObservationID
+  left_join(issue3_CZ_0019_048 %>%
+              select(PlotObservationID, LONGITUDE_decimal, LATITUDE_decimal,
+                     PRECISION)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        HERE,
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal, -PRECISION)
+```
+
+### ES_0003
+
+Read the file in the raw data folder.
+
+```{r}
+issue3_ES_0003 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "Issue3_ES_0003_corrected.xlsx"))
+```
+
+```{r}
+nrow(issue3_ES_0003)
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "ES_0003" & coordinates_equal == FALSE))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "ES_0003" & coordinates_equal == FALSE) %>%
+  # Join with issue3_ES_0003 based on PlotObservationID
+  left_join(issue3_ES_0003 %>%
+              select(PlotObservationID, LONGITUDE, LATITUDE,
+                     PRECISION)) %>%
+  # Update Longitude, Latitude and `Location uncertainty (m)`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        HERE,
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, LONGITUDE, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE, Latitude),
+    `Location uncertainty (m)` = if_else(
+      UpdateFlag, PRECISION, `Location uncertainty (m)`)
     ) %>%
+  # Update column edit_coords_unc to label edits
+  mutate(edit_coords_unc = if_else(UpdateFlag, TRUE, edit_coords_unc)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE, -LATITUDE, -PRECISION)
+```
+
+### PL_0009
+
+Read the file in the raw data folder (I manually corrected the coordiantes of the last 4 rows of this file because latitude and longitude were mxied - Ilona sent an email about this).
+
+```{r}
+issue3_PL_0009 <- read_excel(
+  here("data", "edited", "Issue3_PL_0009_coorected_corrAV.xlsx"))
+```
+
+```{r}
+nrow(issue3_PL_0009)
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "PL_0009" & coordinates_consistent == FALSE))
+```
+
+Ilona's email: I am sending you corrected coordinate for PL_0009 – one coordinate and coding of 1 plot – changes in red.
+
+According to info in Excel file (), need to update Longitude, Latitude and ReSurvey plot. 
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "PL_0009" & coordinates_consistent == FALSE) %>%
+  # Join with issue3_PL_0009 based on PlotObservationID
+  left_join(issue3_PL_0009 %>%
+              select(PlotObservationID, `ReSurvey plot`, Longitude, Latitude) %>%
+              # Rename columns `Resurvey plot`, Longitude and Latitude
+              # to avoid joining on these columns
+              rename(`ReSurvey plot.new` = `ReSurvey plot`,
+                     Longitude.new = Longitude, Latitude.new = Latitude)) %>%
+  # Update Longitude, Latitude and `ReSurvey plot`with the new values
+  # if UpdateFlag = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        HERE,
-      "Different coordinates for different obs of same plot OK", edits_AV)
+    Longitude = if_else(UpdateFlag, Longitude.new, Longitude),
+    Latitude = if_else(UpdateFlag, Latitude.new, Latitude),
+    `ReSurvey plot` = if_else(
+      UpdateFlag, `ReSurvey plot.new`, `ReSurvey plot`)
+    ) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Update column edit_pplot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -Longitude.new, -Latitude.new, -`ReSurvey plot.new`)
+```
+
+### IT_0004
+
+Text in Ilona's email: One correction for issue4 – 6 coordinates are corrected – however this DB – has another problem with rs_codes (seems to me that original coding of plots are wrong – that´s why you have not repeating plots) and also one group of observation has also dubious coordinates. I am waiting for another corrections.
+
+```{r}
+Issue3_IT_0004 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue3",
+       "Issue3_IT_0004_corected.xlsx"))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID == 339442 |
+           PlotObservationID == 339443 | PlotObservationID ==339441) %>%
+  # Join with Issue3_IT_0004 based on PlotObservationID
+  left_join(Issue3_IT_0004 %>%
+              mutate(Longitude_new = Longitude, Latitude_new = Latitude) %>%
+              select(PlotObservationID, Longitude_new, Latitude_new)) %>%
+  # Update Longitude and Latitude with the new values
+  # if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, Longitude_new, Longitude),
+    Latitude = if_else(UpdateFlag, Latitude_new, Latitude)
+    ) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -Longitude_new, -Latitude_new)
+```
+
+### Correction confirmation
+
+Confirm that all that needed to be corrected have been corrected:
+
+```{r}
+all.equal(
+  db_resurv_updated %>% filter(correct == "to_correct") %>%
+    distinct(RS_CODE, Dataset, `ReSurvey project`) %>% arrange(RS_CODE),
+  db_resurv_updated %>% filter(correct == "to_correct") %>%
+    distinct(RS_CODE, Dataset, `ReSurvey project`) %>% arrange(RS_CODE)
+  )
+```
+
+## Remove unneeded column and recalculate some variables
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Remove "correct" column (not needed anymore)
+  select(-correct) %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec)) %>%
+  # Recalculate coordinates_equal and coordinates_consistent
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  mutate(
+    lon_range = ifelse(all(is.na(Lon_updated)), NA,
+                       max(Lon_updated, na.rm = T) - 
+                         min(Lon_updated, na.rm = T)),
+    lat_range = ifelse(all(is.na(Lat_updated)), NA,
+                       max(Lat_updated, na.rm = T) - 
+                         min(Lat_updated, na.rm = T)),
+    coordinates_equal = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                               lon_range == 0 & lat_range == 0),
+    coordinates_consistent = ifelse(is.na(Lon_updated) & is.na(Lat_updated), NA,
+                                    lon_range < threshold &
+                                      lat_range < threshold)
+    ) %>%
+  ungroup() %>%
+  select(-lon_range, -lat_range)
+```
+
+## Updated barplot of coordinate status
+
+```{r}
+db_resurv_updated %>% 
+  group_by(RS_CODE,`ReSurvey site`, `ReSurvey plot`) %>%
+  summarize(is_equal = all(coordinates_equal),
+            is_consistent = all(coordinates_consistent),
+            .groups = "drop") %>%
+  mutate(coordinate_status = case_when(
+    is_equal ~ "Equal",
+    !is_equal & is_consistent ~ "Consistent (< 0.001º)",
+    !is_equal & !is_consistent ~ "Inconsistent (> 0.001º)")) %>%
+  count(coordinate_status)%>%
+  mutate(percentage = n / sum(n) * 100) %>%
+  ggplot(aes(x = percentage, y = coordinate_status, fill = coordinate_status)) +
+  geom_bar(stat = "identity") + 
+  geom_text(aes(label = paste0(round(percentage, 1), "%")),
+            position = position_stack(vjust = 0.5), size = 3) + 
+  labs(x = "Percentage of Plots", y = NULL) +
+  theme(axis.text.y = element_text(size = 12)) +
+  coord_flip() + theme(legend.position = "none")
+```
+
+# Correction ISSUE 4
+
+## Count resurveys
+
+```{r}
+count_resurveys <- db_resurv_updated %>%
+  # Convert dates to date format and get the year
+  mutate(date = dmy(`Date of recording`), year = year(date)) %>%
+ # Group by RS_CODE, `ReSurvey site`, `ReSurvey plot`
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  summarise(
+    # Get how many different years for each unique group
+    distinct_years=n_distinct(year), 
+    # Get how many different dates for each unique group
+    distinct_dates=n_distinct(date), .groups = "drop")
+```
+
+Summary stats:
+
+```{r}
+summary(count_resurveys$distinct_years)
+sd(count_resurveys$distinct_years)
+```
+
+Histograms:
+
+```{r}
+# For all data
+ggplot(count_resurveys, aes(x = distinct_years)) + 
+  geom_histogram(fill = "white", color = "black", bins = 55)+
+  xlab("Number of ReSurvey observations (different years)") +
+  ylab("Number of plots")
+```
+
+Number and proportion of plots with only 1 resurvey (should not be so!)
+
+```{r}
+nrow(count_resurveys%>%filter(distinct_years==1))
+nrow(count_resurveys%>%filter(distinct_years==1))/nrow(count_resurveys)
+```
+
+Ilona sent file "issue4_remarks.xlsx".
+
+Based on the info in the "remark" column in this file, I created a new column "correct" (in a new file, located in the data/edited folder). This column shows:
+
+- manually: these rows should be manually corrected based on the info on the "remark" column
+
+- not_resurv: these rows do not belong to resurveys, so ReSurvey plot (Y/N) should be changed to N, and these rows should be later added to db_EVA
+
+- remove: these rows have different designs and should be excluded
+
+- wait: Ilona sent email to custodian and we are waiting for response
+
+Read the file in the edited data folder.
+
+```{r}
+issue4_remarks <- read_excel(
+  here("data", "edited","issue4_remarks_editedAV.xlsx"))
+```
+
+## not_resurv
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Join issue4_remarks
+  left_join(
+    issue4_remarks %>%
+      select(RS_CODE, `ReSurvey site`, `ReSurvey plot`, correct)
+    ) %>%
+  # Create a column edit_not_resurv to mark rows to update
+  mutate(edit_not_resurv = ifelse(correct == "not_resurv", TRUE, FALSE)) %>%
+  # Set NA values for edit_not_resurv as FALSE
+  mutate(edit_not_resurv = ifelse(is.na(edit_not_resurv),
+                                  FALSE, edit_not_resurv))
+```
+
+Save rows to add later to EVA-db.
+
+```{r}
+write_tsv(db_resurv_updated %>% filter(edit_not_resurv == T),
+          here("data", "clean","db_add_to_EVA.csv"))
+```
+
+Remove those rows from db_resurv_updated and remove column "edit_not_resurv".
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  filter(edit_not_resurv == F) %>% select(-edit_not_resurv)
+```
+
+## remove
+
+Remove rows where column "correct" is equal to "remove".
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  filter(correct != "remove" | is.na(correct))
+```
+
+## manually
+
+```{r}
+nrows_corr_manually <- nrow(db_resurv_updated %>% filter(correct == "manually"))
+```
+
+I need to correct `nrows_corr_manually` rows manually.
+
+```{r}
+db_resurv_updated %>% filter(correct == "manually") %>% count(RS_CODE)
+```
+
+
+### AT_0001
+
+```{r}
+count_resurveys %>% filter(RS_CODE == "AT_0001" & distinct_years == 1)
+```
+
+Remark in Ilona's file: wrong year for 1 observation, see rs_time (when value 1, yoer should be 2003) - typing mistake.
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_date to mark rows to update
+  mutate(edit_date = RS_CODE == "AT_0001" &
+           (`ReSurvey plot` == "17" | `ReSurvey plot` == "A_2955") &
+           RS_TIME == 1) %>%
+  # Update `Date of recording` if edit_date = TRUE
+  mutate(
+    `Date of recording` = if_else(
+      edit_date,
+      str_replace_all(`Date of recording`, "2022", "2003"),
+      `Date of recording`)
     )
-
-
 ```
 
-Cases where different coordinates for different observations of the same plot are not correct:
+### CZ_0001
+
+Remark in Ilona's file: Repeated RS_plot should be Slana1.
+
+Change ReSurvey site from "Slana1" to "Slana".
+
+Update db_resurv_updated.
 
 ```{r}
-db_updated <- db_updated %>%
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_date to mark rows to update
+  mutate(edit_site = `ReSurvey site` == "Slana1") %>%
+  # Update `ReSurvey site` if edit_site = TRUE
   mutate(
-    edits_AV = if_else(
-      `ReSurvey plot (Y/N)` == "Y" &
-        RS_CODE == "AT_0011" & Dataset == "AT_DonauAuen",
-      "Different coordinates for different obs of same plot not OK", edits_AV)
-    ) 
-
-
-
+    `ReSurvey site` = if_else(
+      edit_site, 
+      str_replace_all(`ReSurvey site`, "Slana1", "Slana"),
+      `ReSurvey site`)
+    )
 ```
 
-## a
+### ES_0001d
 
+Remark in Ilona's file: is repeated, corrected date (I remember sometimes last year).
 
+Correct date of second resurvey (RS_TIME == 2) to 2018.
 
-
-# OLD from here
-
-# Filter to get only resurveys and save db_resurv in edited data folder
+Update db_resurv_updated.
 
 ```{r}
-db_resurv <- db %>% filter(`ReSurvey plot (Y/N)` == "Y")
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "ES_0001d" & correct == "manually" &
+           RS_TIME ==2) %>%
+  # Update `Date of recording` if UpdateFlag = TRUE
+  mutate(
+    `Date of recording` = if_else(
+      UpdateFlag,
+      str_replace_all(`Date of recording`, "2005", "2018"),
+      `Date of recording`)
+    ) %>%
+  # Update column edit_date to label edits
+  mutate(edit_date = if_else(UpdateFlag, TRUE, edit_date)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### FR_0002f
+
+Remark in Ilona's file: corrected name of this plot.
+
+Change ReSurvey plot from "PSET3-4" to "PSET 3-4"
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = `ReSurvey plot` == "PSET3-4") %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(
+    `ReSurvey plot` = if_else(UpdateFlag, "PSET 3-4", `ReSurvey plot`)
+    ) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### FR_0002h
+
+Remark in Ilona's file: correcte dname for PSET T2 5-6, repeated 3x
+
+Change ReSurvey plot from "PSET T2  5-6" to "PSET T2 5-6".
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = `ReSurvey plot` == "PSET T2  5-6") %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(
+    `ReSurvey plot` = if_else(UpdateFlag, "PSET T2 5-6", `ReSurvey plot`)
+    ) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### IT_0001c
+
+Remark in Ilona's file: chnnge of coding RS_plot, some plots have index a (same area as old observ) or b (smaller Area), indexes kept in rs_observ.
+
+Remove "b" and "a" from ReSurvey plot.
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "IT_0001c" & correct == "manually" &
+      (str_detect(`ReSurvey plot`, "a") | str_detect(`ReSurvey plot`, "b"))
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(
+    `ReSurvey plot` = if_else(
+      UpdateFlag,
+      str_replace_all(`ReSurvey plot`, "[ab]", ""),  # Matches both "a" and "b"
+      `ReSurvey plot`)
+    ) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+Also change ReSurvey plot 894 to 89 which seems to be the correct number.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "IT_0001c" & correct == "manually" &
+      `ReSurvey plot` == "894"
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(`ReSurvey plot` = if_else(UpdateFlag, "89", `ReSurvey plot`)) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### IT_0001d
+
+Remark in Ilona's file: 1 old correspond to more new observation A,B,C - removed indexes from plots, kept in observations.
+
+Remove "A", "B" and "C" from ReSurvey plot.
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "IT_0001d" & correct == "manually" &
+      (str_detect(`ReSurvey plot`, "A") | str_detect(`ReSurvey plot`, "B") |
+         str_detect(`ReSurvey plot`, "C"))
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(
+    `ReSurvey plot` = if_else(
+      UpdateFlag,
+      str_replace_all(`ReSurvey plot`, "[ABC]", ""),
+      `ReSurvey plot`)
+    ) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### IT_0001e
+
+Remark in Ilona's file: change of RS_PLOTS (1 original 1O, more new 1s = standard size 100m, a, b, c = same, larger size).
+
+Remove "a", "b", "c" and "s" from ReSurvey plot.
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "IT_0001e" & correct == "manually" &
+      (str_detect(`ReSurvey plot`, "a") | str_detect(`ReSurvey plot`, "b") |
+         str_detect(`ReSurvey plot`, "c") | str_detect(`ReSurvey plot`, "s"))
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(
+    `ReSurvey plot` = if_else(
+      UpdateFlag,
+      str_replace_all(`ReSurvey plot`, "[abcs]", ""),
+      `ReSurvey plot`)
+    ) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### LV_0001b
+
+Remark in Ilona's file: changed for B10, !! For whole dataset I changed RS_codes - added plot sizes - to be able to link same size through years, nested design.
+
+Change ReSurvey plot b10 to B10.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "LV_0001b" & correct == "manually" &
+      `ReSurvey plot` == "b10"
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(`ReSurvey plot` = if_else(UpdateFlag, "B10", `ReSurvey plot`)) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+All rows have Relevé area (m²). Later we should select rows with the same Relevé area (m²) throughout the years, and discard others.
+
+For cases where there are multiple observations per year, I can use Relevé area (m²) to select one of the observations (the one that has an area equal to the area in other years). 
+
+### NO_0001
+
+Remark in Ilona's file: resampling N-N, both old and new from same locality, rs_plot changed for Ullerengsanden_Ullerengslaguna, precision ofr old set for 1000 m.
+
+Change ReSurvey plot Ullerengsanden and Ullerengslaguna to Ullerengsanden_Ullerengslaguna.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "NO_0001" & correct == "manually" &
+      (`ReSurvey plot` == "Ullerengsanden" | 
+         `ReSurvey plot` == "Ullerengslaguna")
+    ) %>%
+  # Update `ReSurvey plot` if UpdateFlag = TRUE
+  mutate(`ReSurvey plot` = if_else(UpdateFlag, "Ullerengsanden_Ullerengslaguna",
+                                   `ReSurvey plot`)) %>%
+  # Update column edit_plot to label edits
+  mutate(edit_plot = if_else(UpdateFlag, TRUE, edit_plot)) %>%
+  # Change Location uncertainty (m) to 1000 m when RS_TIME == 1
+  # Create a column edit_unc to mark rows to update
+  mutate(edit_unc = UpdateFlag & RS_TIME == 1) %>%
+  # Update `Location uncertainty (m)` if edit_unc = TRUE
+  mutate(`Location uncertainty (m)` = ifelse(edit_unc, 1000,
+                                             `Location uncertainty (m)`)) %>%
+# Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### SI_0002a
+
+Remark in Ilona's file: error in RS_SITE changed for RF.
+
+Change ReSurvey site FS to RS.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(
+    UpdateFlag = RS_CODE == "SI_0002a" & correct == "manually" &
+      `ReSurvey site` == "FS"
+    ) %>%
+  # Update `ReSurvey site` if UpdateFlag = TRUE
+  mutate(`ReSurvey site` = if_else(UpdateFlag, "RS", `ReSurvey site`)) %>%
+  # Update column edit_site to label edits
+  mutate(edit_site = if_else(UpdateFlag, TRUE, edit_site)) %>%
+  # Remove unneeded column
+  select(-UpdateFlag)
+```
+
+### UA_0001
+
+Text in Ilona's email: One correction for issue4 – 6 coordinates are corrected – however this DB – has another problem with rs_codes (seems to me that original coding of plots are wrong – that´s why you have not repeating plots) and also one group of observation has also dubious coordinates. I am waiting for another corrections.
+
+```{r}
+issue4_UA_0001 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue 4",
+       "UA_0001_issue4_onlycorrected.xlsx"))
 ```
 
 ```{r}
-write_tsv(db_resurv,here("data", "edited","db_resurv.csv"))
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID %in% 
+           c(382299, 382301, 382325, 382314, 382322, 382324)) %>%
+  # Join with issue4_UA_0001 based on PlotObservationID
+  left_join(issue4_UA_0001 %>%
+              mutate(PlotObservationID = PlotID) %>%
+              select(PlotObservationID, LONGITUDE, LATITUDE)) %>%
+  # Update Longitude and Latitude with the new values
+  # if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, LONGITUDE, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE, Latitude)
+    ) %>%
+  # Update ReSurvey site with "Syvulka_5" if UpdateFlag = TRUE
+  mutate(`ReSurvey site` = if_else(UpdateFlag,
+                                   "Syvulka_5", `ReSurvey site`)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Update column edit_site to label edits
+  mutate(edit_site = if_else(UpdateFlag, TRUE, edit_site)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE, -LATITUDE)
 ```
 
-# Filter to get "not resurveys" and save db_EVA in edited data folder
+## Remove unneeded column
 
 ```{r}
-db_EVA <- db %>%
-  filter(`ReSurvey plot (Y/N)` == "N" | is.na(`ReSurvey plot (Y/N)`))
+db_resurv_updated <- db_resurv_updated %>%
+  # Remove "correct" column (not needed anymore)
+  select(-correct)
+```
+
+## Recalculate count resurveys
+
+```{r}
+count_resurveys <- db_resurv_updated %>%
+  # Convert dates to date format and get the year
+  mutate(date = dmy(`Date of recording`), year = year(date)) %>%
+ # Group by RS_CODE, `ReSurvey site`, `ReSurvey plot`
+  group_by(RS_CODE, `ReSurvey site`, `ReSurvey plot`) %>%
+  summarise(
+    # Get how many different years for each unique group
+    distinct_years=n_distinct(year), 
+    # Get how many different dates for each unique group
+    distinct_dates=n_distinct(date), .groups = "drop")
+```
+
+Summary stats:
+
+```{r}
+summary(count_resurveys$distinct_years)
+sd(count_resurveys$distinct_years)
+```
+
+Histograms:
+
+```{r}
+# For all data
+ggplot(count_resurveys, aes(x = distinct_years)) + 
+  geom_histogram(fill = "white", color = "black", bins = 55)+
+  xlab("Number of ReSurvey observations (different years)") +
+  ylab("Number of plots")
+```
+
+Number and proportion of plots with only 1 resurvey (should not be so!)
+
+```{r}
+nrow(count_resurveys%>%filter(distinct_years==1))
+nrow(count_resurveys%>%filter(distinct_years==1))/nrow(count_resurveys)
+```
+
+### TO DO: Add rows "not_resurv" to EVA_db
+
+### TO DO: Implement choice of multiple observations per year based on Relevé area (m²)
+
+# Corrrection ISSUE 5
+
+I did not correct anything as Ilona just sent a file confirming if (or not) part or all of each dataset contains presence / absence data. For us, the important thing is that if data is presence / absence, there is no EUNIS habitat assigned by the Expert System and thus we cannot use the data for relating to RS variables (except for the dataset “DK_Naturdata_Res” where I have used the Annex I codes provided by the custodian to assign an EUNIS habitat code).
+
+# Correction ISSUE 6
+
+## Correct coordinates for RS_CODE CZ_0029
+
+Text in Ilona's email: CZ_0029 I have noticed that some coordinates are wrongly placed so some of coordinates were corrected last year – I am sening you new coordinates for the whole dataset (again pleace mind that Long/lat is in DDMMSS.SS fromat not in decimal degree).
+
+Attached: CZ_0029_correctedcoordinates.xlsx
+
+```{r}
+issue6_CZ_0029 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue6",
+       "CZ_0029_correctedcoordinates.xlsx"))
+```
+
+Apply the conversion function to the longitude and latitude columns:
+
+```{r}
+issue6_CZ_0029 <- issue6_CZ_0029 %>%
+  mutate(LONGITUDE_decimal = sapply(LONGITUDE, convert_to_decimal),
+         LATITUDE_decimal = sapply(LATITUDE, convert_to_decimal))
 ```
 
 ```{r}
-write_tsv(db_EVA,here("data", "edited","db_EVA.csv"))
+nrow(issue6_CZ_0029)
+nrow(db_resurv_updated %>%
+       filter(RS_CODE == "CZ_0029"))
+```
+
+Update db_resurv_updated.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = RS_CODE == "CZ_0029") %>%
+  # Join with issue6_CZ_0029 based on PlotObservationID
+  left_join(issue6_CZ_0029 %>%
+              select(PlotObservationID, LONGITUDE_decimal,
+                     LATITUDE_decimal)) %>%
+  # Update Longitude and Latitude and with the new values
+  # if UpdateFlag = TRUE
+  mutate(
+    Longitude = if_else(UpdateFlag, LONGITUDE_decimal, Longitude),
+    Latitude = if_else(UpdateFlag, LATITUDE_decimal, Latitude)
+    ) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE_decimal, -LATITUDE_decimal) %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec))
+```
+
+## Correct Country for some RS_CODEs
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_country to mark rows to update
+  mutate(edit_country = (RS_CODE == "CZ_0001" & Country == "Poland") |
+           RS_CODE == "DE_0035" | RS_CODE == "forestREplot_EU_072") %>%
+  # Update Country with new value if edit_country = TRUE
+  mutate(
+    Country = case_when(
+      edit_country & RS_CODE == "CZ_0001" & Country == "Poland" ~ 
+        "Slovak Republic",
+      edit_country & RS_CODE == "DE_0035" ~ "Germany",
+      edit_country & RS_CODE == "forestREplot_EU_072" ~ "Ukraine",
+      TRUE ~ Country)
+    )
+```
+
+## AT_0004c
+
+Longitude was wrong, correct.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID == 4429 | PlotObservationID == 4519) %>%
+  # Update Longitude with the new values
+  # if UpdateFlag = TRUE
+  mutate(Longitude = if_else(UpdateFlag, 13.681981, Longitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag)  %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec))
+```
+
+## CZ_0019_010
+
+Latitude was wrong, correct.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID == 6400 | PlotObservationID == 6401 |
+           PlotObservationID == 6402) %>%
+  # Update Latitude with the new values
+  # if UpdateFlag = TRUE
+  mutate(Latitude = if_else(UpdateFlag, 50.140555999999997, Latitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag)  %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec))
+```
+
+## IT_0008
+
+Longitude and latitude were wrong, correct.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID == 340426 |
+           PlotObservationID == 340427) %>%
+  # Update Longitude and Latitude with the new values
+  # if UpdateFlag = TRUE
+  mutate(Longitude = if_else(UpdateFlag, 14.84303305, Longitude),
+         Latitude = if_else(UpdateFlag, 42.0966762, Latitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag)  %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec))
+```
+
+## AT_0007
+
+```{r}
+issue6_AT_0007 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue6",
+       "Issue6_newcorrections", "Issue6_AT_0007corrected.xlsx"))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID %in% issue6_AT_0007$plotID) %>%
+  # Join with issue6_AT_0007 based on PlotObservationID
+  left_join(issue6_AT_0007 %>%
+              mutate(PlotObservationID = plotID) %>%
+              select(PlotObservationID, countrycode_new)) %>%
+  # Update Country and with the new values
+  # if UpdateFlag = TRUE
+  mutate(Country = if_else(UpdateFlag, countrycode_new, Country)) %>%
+  mutate(Country = case_when(
+    Country == "AT" ~ "Austria",
+    Country == "SI" ~ "Slovenia",
+    Country == "CH" ~ "Switzerland",
+    Country == "DE" ~ "Germany",
+    Country == "IT" ~ "Italy",
+    TRUE ~ Country)) %>%
+  # Update column edit_country to label edits
+  mutate(edit_country = if_else(UpdateFlag, TRUE, edit_country)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -countrycode_new)
+```
+
+## CH_0002
+
+Text in Ilona's email: CH_0002 corrected coordinates.
+
+```{r}
+issue6_CH_0002 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue6",
+       "Issue6_newcorrections", "Issue6_CH_0002_correctedcoordinates.xlsx"))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID %in%
+           issue6_CH_0002$PlotObservationID) %>%
+  # Join with issue6_CH_0002 based on PlotObservationID
+  left_join(issue6_CH_0002 %>%
+              select(PlotObservationID, LONGITUDE, LATITUDE)) %>%
+  # Update coordinates and with the new values
+  # if UpdateFlag = TRUE
+  mutate(Longitude = if_else(UpdateFlag, LONGITUDE, Longitude),
+         Latitude = if_else(UpdateFlag, LATITUDE, Latitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -LONGITUDE, -LATITUDE)
+```
+
+## LT_0001
+
+Text in Ilona's email: LT_0001 – again corrected coordinates – all plots in LT.
+
+```{r}
+issue6_LT_0001 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue6",
+       "Issue6_newcorrections", "Issue6_LT_0001_correctedcoord.xlsx"))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID %in%
+           issue6_LT_0001$PlotObservationID) %>%
+  # Join with issue6_LT_0001 based on PlotObservationID
+  left_join(issue6_LT_0001 %>%
+              select(PlotObservationID, Checked_Lat, Checked_Lon)) %>%
+  # Update coordinates with the new values
+  # if UpdateFlag = TRUE
+  mutate(Longitude = if_else(UpdateFlag, Checked_Lon, Longitude),
+         Latitude = if_else(UpdateFlag, Checked_Lat, Latitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -Checked_Lat, -Checked_Lon)
+```
+
+## DE_0037_074
+
+Text in Ilona's email: Please mind that precise coordinates are private. Ute gave me X and Y values with info about coordinates system - according her it is  ETRS_1989_UTM_Zone_32N. According me x and y are in PD/83 / 3-degree Gauss-Kruger zone 3 (E-N) - EPSG:5666. SO I modified them into wgs84 (values in longitude/latitude) – I am not GIS guy so I just used ARCGIS Pro for projection – please check but the plots now are located on the correct side of river in Germany.
+
+I took the cordinates as OK without further checking.
+
+```{r}
+issue6_DE_0037_074 <- read_excel(
+  here("data", "raw", "Data_corrections_Ilona", "Issue6",
+       "Issue6_newcorrections", "Issue6_DE_0037_74_correctedfin.xlsx"))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create an UpdateFlag to mark rows to update
+  mutate(UpdateFlag = PlotObservationID %in%
+           issue6_DE_0037_074$PlotObservationID) %>%
+  # Join with issue6_DE_0037_074 based on PlotObservationID
+  left_join(issue6_DE_0037_074 %>%
+              mutate(Longitude_new = Longitude, Latitude_new = Latitude) %>%
+              select(PlotObservationID, Longitude_new, Latitude_new)) %>%
+  # Update coordinates with the new values
+  # if UpdateFlag = TRUE
+  mutate(Longitude = if_else(UpdateFlag, Longitude_new, Longitude),
+         Latitude = if_else(UpdateFlag, Latitude_new, Latitude)) %>%
+  # Update column edit_coords to label edits
+  mutate(edit_coords = if_else(UpdateFlag, TRUE, edit_coords)) %>%
+  # Recalculate updated coordinates
+  mutate(Lon_updated = ifelse(is.na(Lon_prec), Longitude, Lon_prec),
+         Lat_updated = ifelse(is.na(Lat_prec), Latitude, Lat_prec)) %>%
+  # Remove unneeded columns
+  select(-UpdateFlag, -Longitude_new, -Latitude_new)
+```
+
+## Check if Country is correct
+
+Check if Country is correct directly in R (not ArcGIS).
+
+```{r}
+# Load world boundaries
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Convert points to an sf object
+points <- st_as_sf(db_resurv_updated %>%
+                     filter(!is.na(Lon_updated) & !is.na(Lat_updated)),
+                   coords = c("Lon_updated", "Lat_updated"), crs = 4326)
+
+# Perform spatial join to find the country
+points_with_country <- st_join(points, world, join = st_within, left = T)
+```
+
+```{r}
+# Compare countries
+db_resurv_updated_country <- db_resurv_updated %>%
+  left_join(points_with_country %>%
+              select(PlotObservationID, sovereignt),
+            by = "PlotObservationID") %>%
+  mutate(geocoded_country = if_else(
+    is.na(Lon_updated) | is.na(Lat_updated), 
+    NA_character_, sovereignt)) %>%
+  select(-sovereignt, - geometry) %>%
+  # Change the names of some countries for matching
+  mutate(geocoded_country = if_else(geocoded_country == "Czechia",
+                                    "Czech Republic", geocoded_country)) %>%
+  mutate(geocoded_country = if_else(geocoded_country == "Slovakia",
+                                    "Slovak Republic", geocoded_country))
+db_resurv_updated_country$country_correct <-
+  db_resurv_updated_country$Country ==
+  db_resurv_updated_country$geocoded_country
+db_resurv_updated <- db_resurv_updated %>%
+  left_join(db_resurv_updated_country %>%
+              select(PlotObservationID, geocoded_country, country_correct))
+```
+
+```{r}
+db_resurv_updated %>% count(country_correct)
+```
+
+Show map with points where country_correct is FALSE.
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(country_correct == FALSE) %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Compute centroids for labeling
+world_centroids <- world %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(lon = st_coordinates(centroid)[, 1],
+         lat = st_coordinates(centroid)[, 2])
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(country_correct == FALSE),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+Show map with points where country_correct is NA.
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(is.na(country_correct)) %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(is.na(country_correct)),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+Points where country_correct is NA and Country  == "United Kingdom".
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(is.na(country_correct) & Country == "United Kingdom") %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(is.na(country_correct) & Country == "United Kingdom"),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+Points where country_correct is NA and Country  == "Denmark".
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(is.na(country_correct) & Country == "Denmark") %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(is.na(country_correct) & Country == "Denmark"),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+Points where country_correct is NA and Country  == "Italy".
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(is.na(country_correct) & Country == "Italy") %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(is.na(country_correct) & Country == "Italy"),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+Points where country_correct is NA and Country is other or NA.
+
+```{r}
+# Calculate the extent of the points
+points_extent <- db_resurv_updated %>%
+  filter(is.na(country_correct) & (
+    Country == "Germany" | Country == "Lithuania" | Country == "Norway" |
+      Country == "Poland" | Country == "Sweden" | is.na(Country))) %>%
+  summarise(
+    lon_min = min(Lon_updated, na.rm = TRUE),
+    lon_max = max(Lon_updated, na.rm = TRUE),
+    lat_min = min(Lat_updated, na.rm = TRUE),
+    lat_max = max(Lat_updated, na.rm = TRUE)
+  )
+
+# Add padding to the extent (adjust as needed)
+padding <- 0.5  # Adjust padding to your preference
+x_limits <- c(points_extent$lon_min - padding, points_extent$lon_max + padding)
+y_limits <- c(points_extent$lat_min - padding, points_extent$lat_max + padding)
+
+# Create the zoomed map
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_point(data = db_resurv_updated %>%
+               filter(is.na(country_correct) & (
+                 Country == "Germany" | Country == "Lithuania" |
+                   Country == "Norway" | Country == "Poland" |
+                   Country == "Sweden" | is.na(Country))),
+             aes(x = Lon_updated, y = Lat_updated, color = Country),
+             size = 2) +
+  geom_text(data = world_centroids, 
+            aes(x = lon, y = lat, label = sovereignt),
+            size = 3, color = "black") +  # Adjust size and color as needed
+  coord_sf(xlim = x_limits, ylim = y_limits) +
+  theme_minimal()
+```
+
+3 points where country_correct is NA and Country is Lithuania have no coordinates.
+
+```{r}
+db_resurv_updated %>%
+  filter(is.na(country_correct) & Country == "Lithuania") %>%
+  select(Lon_updated, Lat_updated)
+```
+
+## Add column country_new and update column country_correct
+
+Column country_new shows the geocoded_country, or, for points where country_correct is NA  and Country is United Kingdom, Denmark, Italy, Sweden, Germany, Norway and Poland, it shows the actual Country, which was correct according to maps.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Add column country_new
+  # Firs, consider geocoded_country
+  mutate(country_new = geocoded_country) %>%
+  # For points where country_correct is NA  and Country is United Kingdom, 
+  # Denmark, Italy, Sweden, Germany, Norway and Poland, Country is correct
+  mutate(country_new = if_else(
+    is.na(country_correct) & 
+      (Country == "United Kingdom" | Country == "Denmark" | Country == "Italy" |
+         Country == "Sweden" | Country == "Germany" | Country == "Norway") |
+      Country == "Poland",
+    Country, country_new)) %>%
+  # For points where country_correct is NA and Country is NA, 
+  # country_new should be Germany
+  mutate(country_new = if_else(is.na(country_correct) & is.na(Country),
+                                "Germany", country_new))
+```
+
+Update column country_correct, based on if country_new is equal to Country.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Update column country_correct (TRUE if country_new is equal from Country)
+  mutate(country_correct = Country == country_new)
+```
+
+```{r}
+db_resurv_updated %>% count(country_correct)
+```
+
+## Remove unneeded column
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  select(-geocoded_country)
+```
+
+# Correction ISSUE 8
+
+Correct some EUNIS codes that are probably wrong:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_expert_sys to mark rows to update
+  # Set edit_expert_sys to FALSE if `Expert System` is NA
+  mutate(
+    edit_expert_sys = if_else(is.na(`Expert System`),FALSE, 
+                              str_detect(`Expert System`, 
+                                         "N16M|T1CT|N15A"))) %>%
+  # Update `Expert System`if edit_expert_sys = TRUE
+  mutate(`Expert System` = if_else(
+    edit_expert_sys, 
+    # Apply string replacements using str_replace_all()
+    str_replace_all(`Expert System`, 
+                    c("N16M" = "N16",
+                      "T1CT" = "T1C",
+                      "N15A" = "N15")),`Expert System`))
+```
+
+# Correction ISSUE 10
+
+Translate codes from Location method to words.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_loc_method to mark rows to update
+  mutate(edit_loc_method = `Location method` %in%
+           c("04", "01", "06", "02", "08", "07", "05", "2", "03", "4")) %>%
+  mutate(`Location method` = if_else(`Location method` == "2", "02",
+                                     `Location method`)) %>%
+  mutate(`Location method` = if_else(`Location method` == "4", "04",
+                                     `Location method`)) %>%
+  # Update `Location method`if edit_loc_method = TRUE
+  mutate(`Location method` = if_else(
+    edit_loc_method,
+    # Apply string replacements using str_replace_all()
+    str_replace_all(`Location method`, 
+                    c("01" = "Permanently marked plot isolated (i.e. somewhere within the site)",
+                      "02" = "Marked plot in a grid (i.e. with regularly spaced neighbor plots)",
+                      "03" = "Location with differential GPS",
+                      "04" = "Location with GPS",
+                      "05" = "Location from accurate map",
+                      "06" = "Location from a description",
+                      "07" = "Other",
+                      "08" = "Marked plot in a transect")
+                    ),
+    `Location method`))
+```
+
+```{r}
+ggplot(db_resurv_updated, aes(`Location method`)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Location method") + coord_flip()
+```
+
+# Correction ISSUE 11
+
+Unify codes for ReSurvey project types.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a column edit_RS_PROJTYP to mark rows to update
+  mutate(edit_RS_PROJTYP = RS_PROJTYP == "Resampling" |
+           RS_PROJTYP == "Permanent (man)") %>%
+  mutate(
+    RS_PROJTYP = str_replace(RS_PROJTYP, "^Resampling$", "resampling"), 
+    RS_PROJTYP = str_replace(RS_PROJTYP, 
+                             "^Permanent \\(man\\)$", "permanent (man)")
+    )
+```
+
+```{r}
+ggplot(db_resurv_updated, aes(RS_PROJTYP, fill=`Manipulate (y/n)`)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Resurvey project type") + coord_flip() +
+  theme(legend.position = "top")
+```
+
+# Correction ISSUE 13
+
+Recalculate the column precision_new to be 0 when Lon_prec and Lat_prec are NA, and 1 when Lon_prec and Lat_prec are not NA.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a new column edit_precision_new to mark rows to update
+  # (those where precision_new is NA but Lon_prec and Lat_prec are not NA
+  mutate(edit_precision_new = is.na(precision_new) &
+           (!is.na(Lon_prec) & !is.na(Lat_prec))) %>%
+  # Update precision_new
+  mutate(precision_new = ifelse(is.na(Lon_prec) & is.na(Lat_prec), 0, 1))
+```
+
+# More corrections TBD?
+
+# Create EUNIS columns
+
+Clean info on Expert system column and separate it when there are several codes.
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    # Clean 'Expert System' column by removing "!" and replacing "~" with NA
+    `Expert System` = case_when(
+      `Expert System` == "~" ~ NA_character_,  # Replace "~" with NA
+      TRUE ~ str_replace_all(`Expert System`, "!", "")  # Remove "!"
+    )
+  ) %>%
+  # Separate the values in 'Expert System' into multiple columns
+  separate(
+    `Expert System`,
+    into = c("EUNISa", "EUNISb", "EUNISc", "EUNISd"),
+    sep = ",",
+    extra = "drop",  # Drop extra values if there are more than columns
+    fill = "right",   # Fill missing values with NA for cases with fewer values
+    remove = FALSE    # Keep the original 'Expert System' column
+  )
+```
+
+Calculate how many different EUNIS codes have been assigned:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    # Count the number of non-NA values across the EUNIS columns
+    n_EUNIS = rowSums(!is.na(select(., starts_with("EUNIS"))))
+  )
+```
+
+```{r}
+ggplot(db_resurv_updated, aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+ggplot(db_resurv_updated %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+```
+
+Add columns for the different EUNIS levels:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    # EUNISa levels
+    EUNISa_1 = substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 2, 1)),
+    EUNISa_2 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 3, 2), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISa_3 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 4, 3), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 4, 3)),
+      NA_character_
+      ),
+    EUNISa_4 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 5, 4), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 5, 4)),
+      NA_character_
+    ),
+    
+    # EUNISb levels
+    EUNISb_1 = substr(EUNISb, 1, ifelse(str_starts(EUNISb, "MA"), 2, 1)),
+    EUNISb_2 = ifelse(
+      nchar(EUNISb) >= ifelse(str_starts(EUNISb, "MA"), 3, 2), 
+      substr(EUNISb, 1, ifelse(str_starts(EUNISb, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISb_3 = ifelse(
+      nchar(EUNISb) >= ifelse(str_starts(EUNISb, "MA"), 4, 3), 
+      substr(EUNISb, 1, ifelse(str_starts(EUNISb, "MA"), 4, 3)),
+      NA_character_
+    ),
+    EUNISb_4 = ifelse(
+      nchar(EUNISb) >= ifelse(str_starts(EUNISb, "MA"), 5, 4), 
+      substr(EUNISb, 1, ifelse(str_starts(EUNISb, "MA"), 5, 4)),
+      NA_character_
+    ),
+    
+    # EUNISc levels
+    EUNISc_1 = substr(EUNISc, 1, ifelse(str_starts(EUNISc, "MA"), 2, 1)),
+    EUNISc_2 = ifelse(
+      nchar(EUNISc) >= ifelse(str_starts(EUNISc, "MA"), 3, 2), 
+      substr(EUNISc, 1, ifelse(str_starts(EUNISc, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISc_3 = ifelse(
+      nchar(EUNISc) >= ifelse(str_starts(EUNISc, "MA"), 4, 3), 
+      substr(EUNISc, 1, ifelse(str_starts(EUNISc, "MA"), 4, 3)),
+      NA_character_
+    ),
+    EUNISc_4 = ifelse(
+      nchar(EUNISc) >= ifelse(str_starts(EUNISc, "MA"), 5, 4), 
+      substr(EUNISc, 1, ifelse(str_starts(EUNISc, "MA"), 5, 4)),
+      NA_character_
+    ),
+    
+    # EUNISd levels
+    EUNISd_1 = substr(EUNISd, 1, ifelse(str_starts(EUNISc, "MA"), 2, 1)),
+    EUNISd_2 = ifelse(
+      nchar(EUNISd) >= ifelse(str_starts(EUNISd, "MA"), 3, 2), 
+      substr(EUNISd, 1, ifelse(str_starts(EUNISd, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISd_3 = ifelse(
+      nchar(EUNISd) >= ifelse(str_starts(EUNISd, "MA"), 4, 3), 
+      substr(EUNISd, 1, ifelse(str_starts(EUNISd, "MA"), 4, 3)),
+      NA_character_
+    ),
+    EUNISd_4 = ifelse(
+      nchar(EUNISd) >= ifelse(str_starts(EUNISd, "MA"), 5, 4), 
+      substr(EUNISd, 1, ifelse(str_starts(EUNISd, "MA"), 5, 4)),
+      NA_character_
+    )
+  )
+```
+
+Create new columns with descriptions for the level 1 codes:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    EUNISa_1_descr = case_when(
+      EUNISa_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISa_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISa_1 == "T" ~ "Forests and other wooded land",
+      EUNISa_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISa_1 == "R" ~ "Grasslands",
+      EUNISa_1 == "Q" ~ "Wetlands",
+      EUNISa_1 == "P" ~ "Inland waters",
+      EUNISa_1 == "N" ~ "Coastal habitats",
+      EUNISa_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    ),
+    EUNISb_1_descr = case_when(
+      EUNISb_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISb_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISb_1 == "T" ~ "Forests and other wooded land",
+      EUNISb_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISb_1 == "R" ~ "Grasslands",
+      EUNISb_1 == "Q" ~ "Wetlands",
+      EUNISb_1 == "P" ~ "Inland waters",
+      EUNISb_1 == "N" ~ "Coastal habitats",
+      EUNISb_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    ),
+    EUNISc_1_descr = case_when(
+      EUNISc_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISc_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISc_1 == "T" ~ "Forests and other wooded land",
+      EUNISc_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISc_1 == "R" ~ "Grasslands",
+      EUNISc_1 == "Q" ~ "Wetlands",
+      EUNISc_1 == "P" ~ "Inland waters",
+      EUNISc_1 == "N" ~ "Coastal habitats",
+      EUNISc_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    ),
+    EUNISd_1_descr = case_when(
+      EUNISd_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISd_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISd_1 == "T" ~ "Forests and other wooded land",
+      EUNISd_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISd_1 == "R" ~ "Grasslands",
+      EUNISd_1 == "Q" ~ "Wetlands",
+      EUNISd_1 == "P" ~ "Inland waters",
+      EUNISd_1 == "N" ~ "Coastal habitats",
+      EUNISd_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+Plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
+
+```{r}
+ggplot(db_resurv_updated, aes(EUNISa_1_descr)) +
+  geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations", x = "EUNIS level 1") +
+  coord_flip()
+ggplot(db_resurv_updated %>% filter(!is.na(EUNISa_1_descr)), 
+       aes(EUNISa_1_descr)) +
+  geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations", x = "EUNIS level 1") + 
+  coord_flip()
+```
+
+# Correct topographic vars as numeric
+
+Correct some values and set altitude, slope and aspect as numeric:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+   # Create a new column edit_altitude to mark rows to update
+  # Set edit_atitude to FALSE if Altitude is NA
+  mutate(edit_atitude = if_else(is.na(Altitude), FALSE,
+                                str_detect(Altitude, "-"))) %>%
+  # Update Altitude if edit_altitude = TRUE
+  mutate( Altitude = if_else(edit_atitude, 
+                             # Some altitude values have a "-" after the number,
+                             # convert to numeric after removing that
+                             as.numeric(gsub("-", "", Altitude)),
+                             Altitude))
+```
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Create a new column edit_slope to mark rows to update
+  # Set edit_slope to FALSE if `Slope (°)` is NA
+  mutate(edit_slope = if_else(is.na(`Slope (°)`), FALSE,
+                              str_detect(`Slope (°)`,"_|-"))) %>%
+  # Update `Slope (°)` if edit_slope = TRUE
+  mutate(
+    `Slope (°)` = if_else(edit_slope,
+                          ifelse(`Slope (°)` == "_" | `Slope (°)` == "-",
+                                 NA, `Slope (°)`),
+                          `Slope (°)`)) %>%
+  # Convert slope and aspect to numeric
+  mutate(`Slope (°)` = as.numeric(`Slope (°)`),
+         `Aspect (°)` = as.numeric(`Aspect (°)`))
+```
+
+# Add columns date and year
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(date = dmy(`Date of recording`), year = year(date))
+```
+
+# EUNIS from info on HabitatID from DK 
+
+Based on information got from Jesper.
+
+This is so far not flagged as a change with an "edit_" column because I did not modify any of the original columns on the database. See if we somehow flag the rows where EUNIS was obtained from this info later on.
+
+## Read the data sent by Jesper from DK
+
+```{r}
+db_DK_J<-read_tsv(here("data", "raw",
+                       "DK_Naturdata_Res_habitat_hab_codes_Jesper",
+                  "DK_Naturdata_Res_habitat_hab_codes.txt"))
+```
+
+## Add info on HabitatID to db_resurv_updated
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Keeping all obs in db_resurv_updated but not all in db_DK_J
+  left_join(db_DK_J %>% select(PlotObservationID, HabitatID))
+```
+## Change some Annex I habitat codes that were wrong
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(HabitatID = as.character(HabitatID)) %>%
+  mutate(HabitatID = ifelse(HabitatID == "9998", "91D0",
+                            ifelse(HabitatID == "9999", "91E0", HabitatID)))
+```
+
+## Add info on correspondences HabitatID (DK, Jesper) - EUNIS
+
+Read correspondences file:
+
+```{r}
+correspondences<-read_excel(here("data", "edited",
+                                 "correspondence_HabitatID_DK.xlsx"))
+```
+
+Add info to db_resurv_updated:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  # Keeping all obs in db_resurv_updated but not all in db_DK_J
+  left_join(correspondences %>% select(HabitatID, EUNIS))
+```
+
+Correct NA values in EUNIS
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(EUNIS = ifelse(EUNIS == "NA", NA, EUNIS))
+```
+
+Add info on EUNIS (DK) to EUNISa:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(EUNISa =
+           # If EUNIS (DK) is available, add as EUNISa
+           ifelse(!is.na(EUNIS), EUNIS, 
+                  # Otherwise keep EUNISa
+                  EUNISa),
+         EUNIS_assignation = ifelse(!is.na(EUNIS), "Info from DK",
+                                    ifelse(is.na(EUNISa), "Not possible",
+                                           "Expert system"))) %>%
+  # Remove column EUNIS (DK)
+  select(-EUNIS)
+```
+
+```{r}
+ggplot(db_resurv_updated, aes(EUNIS_assignation)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS assignation")
+```
+
+## Update columns for EUNIS levels and descriptions
+
+Update the columns for the different EUNISs levels:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    # EUNISa levels
+    EUNISa_1 = substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 2, 1)),
+    EUNISa_2 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 3, 2), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 3, 2)),
+      NA_character_
+    ),
+    EUNISa_3 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 4, 3), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 4, 3)),
+      NA_character_
+      ),
+    EUNISa_4 = ifelse(
+      nchar(EUNISa) >= ifelse(str_starts(EUNISa, "MA"), 5, 4), 
+      substr(EUNISa, 1, ifelse(str_starts(EUNISa, "MA"), 5, 4)),
+      NA_character_
+    )
+  ) %>%
+  # Remove HabitatID column
+  select(-HabitatID)
+```
+
+Update columns with descriptions for the level 1 codes:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    EUNISa_1_descr = case_when(
+      EUNISa_1 == "V" ~ "Vegetated man-made habitats",
+      EUNISa_1 == "U" ~ "Inland habitats with no or little soil",
+      EUNISa_1 == "T" ~ "Forests and other wooded land",
+      EUNISa_1 == "S" ~ "Heathlands, scrub and tundra",
+      EUNISa_1 == "R" ~ "Grasslands",
+      EUNISa_1 == "Q" ~ "Wetlands",
+      EUNISa_1 == "P" ~ "Inland waters",
+      EUNISa_1 == "N" ~ "Coastal habitats",
+      EUNISa_1 == "MA" ~ "Marine habitats",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+## Update number of different EUNIS codes
+
+Recalculate how many different EUNIS codes have been assigned:
+
+```{r}
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(
+    # Count the number of non-NA values across the EUNIS columns
+    n_EUNIS = rowSums(!is.na(select(., EUNISa:EUNISd)))
+  )
+```
+
+```{r}
+ggplot(db_resurv_updated, aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+ggplot(db_resurv_updated %>% filter(n_EUNIS > 0), aes(n_EUNIS)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "Number of differnt EUNIS codes assigned") + coord_flip()
+```
+
+New plot for EUNISa_1 (the first assigned EUNIS in cases of multiple assignations, level 1):
+
+```{r}
+ggplot(db_resurv_updated, aes(EUNISa_1_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 1") + coord_flip()
+ggplot(db_resurv_updated %>% filter(!is.na(EUNISa_1_descr)),
+       aes(EUNISa_1_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 1") + coord_flip()
+```
+
+# Add info on descriptions for EUNIS levels 2-4
+
+```{r}
+descriptions<-read_excel(here("data", "edited",
+                                 "EUNIS-Habitats-2021-06-01_modified.xlsx"))
+```
+
+```{r}
+# Define the columns and corresponding description column names
+eunis_cols <- c("EUNISa_2", "EUNISa_3", "EUNISa_4",
+                "EUNISb_2", "EUNISb_3", "EUNISb_4", 
+                "EUNISc_2", "EUNISc_3", "EUNISc_4",
+                "EUNISd_2", "EUNISd_3", "EUNISd_4")
+
+# Create corresponding description column names
+descr_col_names <- paste0(eunis_cols, "_descr")
+
+# Use reduce to loop through the columns and join dynamically based on level
+db_resurv_updated <- reduce(seq_along(eunis_cols), function(data, i) {
+  # Extract level number from the column name (e.g., EUNISa_2 -> 2)
+  level <- as.numeric(gsub("\\D", "", eunis_cols[i]))
+  
+  # Filter descriptions for the corresponding level
+  descriptions_level <- descriptions %>%
+    filter(level == level) %>%
+    select(`EUNIS 2020 code`, `EUNIS-2021 habitat name`)
+  
+  # Perform the left_join and rename the column dynamically
+  data %>%
+    left_join(
+      descriptions_level,
+      by = setNames("EUNIS 2020 code", eunis_cols[i])
+    ) %>%
+    rename(!!descr_col_names[i] := `EUNIS-2021 habitat name`)
+}, .init = db_resurv_updated)
+```
+
+The matching did not work sometimes, correct!
+
+```{r}
+# Correct EUNISa levels 2-4 descriptions
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(EUNISa_2_descr = 
+           ifelse(!is.na(EUNISa_2_descr), EUNISa_2_descr,
+                  case_when(
+                    EUNISa_2 == "Pf" ~ "Fresh-water submerged vegetation",
+                    EUNISa_2 == "Pj" ~ "Stonewort vegetation",
+                    EUNISa_2 == "R4" ~ "Alpine and subalpine grasslands",
+                    EUNISa_2 == "Pb" ~ "Calcareous spring and spring brook",
+                    EUNISa_2 == "Qb" ~ "Wetlands",
+                    EUNISa_2 == "R3" ~ "Seasonally wet and wet grasslands",
+                    EUNISa_2 == "Qa" ~ "Mires",
+                    EUNISa_2 == "Pa" ~ "Base-poor spring and spring brook",
+                    EUNISa_2 == "Ph" ~ "Oligotrophic-water vegetation",
+                    EUNISa_2 == "Pg" ~ "Fresh-water nymphaeid vegetation",
+                    EUNISa_2 ==
+                      "Pd" ~ "Fresh-water small pleustophyte vegetation",
+                    EUNISa_2 == "Pc" ~ "Brackish-water vegetation",
+                    EUNISa_2 ==
+                      "Pe" ~ "Fresh-water large pleustophyte vegetation",
+                    EUNISa_2 == "Pi" ~ "Dystrophic-water vegetation",
+                    EUNISa_2 == "S1" ~ "Tundra",
+                    EUNISa_2 ==
+                      "U7" ~ "Unvegetated or sparsely vegetated gravel bars",
+                    EUNISa_2 == "Q6" ~ "Periodically exposed shores",
+                    TRUE ~ NA_character_)
+                  ),
+         EUNISa_3_descr = 
+           ifelse(!is.na(EUNISa_3_descr), EUNISa_3_descr,
+                  case_when(
+                    EUNISa_3 =="U71" ~ "Unvegetated or sparsely vegetated gravel bar in montane and alpine regions",
+                    EUNISa_3 =="Q61" ~ "Periodically exposed shore with stable, eutrophic sediments with pioneer or ephemeral vegetation",
+                    EUNISa_3 =="Q62" ~ "Periodically exposed shore with stable, mesotrophic sediments with pioneer or ephemeral vegetation",
+                    TRUE ~ NA_character_
+                    ))
+         )
+```
+
+```{r}
+# Correct EUNISb levels 2-4 descriptions
+db_resurv_updated <- db_resurv_updated %>%
+  mutate(EUNISb_2_descr = 
+           ifelse(!is.na(EUNISb_2_descr), EUNISb_2_descr,
+                  case_when(
+                    EUNISb_2 == "Pj" ~ "Stonewort vegetation",
+                    EUNISb_2 == "R4" ~ "Alpine and subalpine grasslands",
+                    EUNISb_2 == "Pf" ~ "Fresh-water submerged vegetation",
+                    TRUE ~ NA_character_)
+                  )
+         )
+```
+
+EUNISc and EUNISd levels 2-4 are OK.
+ 
+# Notes EUNIS codes - to change?
+
+https://www.sci.muni.cz/botany/chytry/Schaminee_etal2021_EEA-Report-Aquatic-Wetland-habitats.pdf
+
+EUNISa_2 == "Q6" : "Periodically exposed shores"
+EUNISa_3 = "Q61" : "Periodically exposed shore with stable, eutrophic sediments with
+pioneer or ephemeral vegetation"
+EUNISa_3 == "Q62" : "Periodically exposed shore with stable, mesotrophic sediments with pioneer or ephemeral vegetation"
+
+This classification of Q + numbers is now coexisting in the database with Qa & Qb (metadata). How to proceed?
+
+```{r}
+db_resurv_updated %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_2)
+```
+
+
+# Plots of level-2 categories within each level 1 category
+
+```{r}
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "MA"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "MA") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","MA_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "N"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "N") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","N_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "P"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "P") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","P_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "Q"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "Q") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","Q_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "R"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "R") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","R_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "S"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "S") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","S_level2.tiff"),
+       width=16,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "T"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "T") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","T_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "U"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "U") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","U_level2.tiff"),
+       width=16,height=8,units="cm",dpi=300)
+ggplot(db_resurv_updated %>% filter(EUNISa_1 == "V"), aes(EUNISa_2_descr)) +
+         geom_bar(aes(y = (..count..) / sum(..count..) * 100)) +
+  labs(y = "Percentage of ReSurvey observations",
+       x = "EUNIS level 2") + coord_flip() +
+  ggtitle(
+    db_resurv_updated %>% filter(EUNISa_1 == "V") %>% distinct(EUNISa_1_descr))
+ggsave(filename=here("output", "figures","V_level2.tiff"),
+       width=14,height=8,units="cm",dpi=300)
+```
+
+# Save to clean data
+
+Save so-far updated and clean datafile for resurvey database:
+
+```{r}
+write_tsv(db_resurv_updated,here("data", "clean","db_resurv_updated_clean.csv"))
 ```
 
 # Session info

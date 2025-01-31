@@ -36,8 +36,8 @@ printall <- function(tibble) {
 
 ```{r, include=FALSE}
 # Read the data
-db_resurv_clean<-read_tsv(
-  here("data", "clean", "db_resurv_clean.csv"),
+db_resurv_updated_clean<-read_tsv(
+  here("data", "clean", "db_resurv_updated_clean.csv"),
   col_types = cols(
     # Dynamically specify EUNIS columns as character
     .default = col_guess(),  # Default guessing for other columns
@@ -79,8 +79,8 @@ db_resurv_clean<-read_tsv(
     EUNISd_4_descr = col_character()
     )
   )
-db_EVA_clean<-read_tsv(
-  here("data", "clean", "db_EVA_clean.csv"),
+db_EVA_updated_clean<-read_tsv(
+  here("data", "clean", "db_EVA_updated_clean.csv"),
   col_types = cols(
     # Dynamically specify EUNIS columns as character
     .default = col_guess(),  # Default guessing for other columns
@@ -117,7 +117,12 @@ db_EVA_clean<-read_tsv(
     EUNISc_4_descr = col_character(),
     EUNISd_2_descr = col_character(),
     EUNISd_3_descr = col_character(),
-    EUNISd_4_descr = col_character()
+    EUNISd_4_descr = col_character(),
+    Lon_prec = col_double(),
+    Lat_prec = col_double(),
+    EUNISc_1_descr = col_character(),
+    EUNISd_1_descr = col_character(),
+    Private = col_character()
   )
 )
 # No parsing issues!
@@ -125,7 +130,7 @@ db_EVA_clean<-read_tsv(
 
 ```{r, include=FALSE}
 # Select key columns and add "database" column
-db_resurv_clean <- db_resurv_clean %>%
+db_resurv_updated_clean <- db_resurv_updated_clean %>%
   select(PlotObservationID, Country, Altitude, `Aspect (°)`, `Slope (°)`,
          starts_with("EUNIS"), `ReSurvey project`, `ReSurvey site`,
          `ReSurvey plot`, `ReSurvey observation`, `Manipulate (y/n)`,
@@ -137,7 +142,7 @@ db_resurv_clean <- db_resurv_clean %>%
 ```
 
 ```{r, include=FALSE}
-db_EVA_clean <- db_EVA_clean %>%
+db_EVA_updated_clean <- db_EVA_updated_clean %>%
   select(PlotObservationID, Country, Altitude, `Aspect (°)`, `Slope (°)`,
          starts_with("EUNIS"), `ReSurvey project`, `ReSurvey site`,
          `ReSurvey plot`, `ReSurvey observation`, `Manipulate (y/n)`,
@@ -151,7 +156,7 @@ db_EVA_clean <- db_EVA_clean %>%
 
 ```{r, include=FALSE}
 # Combine the two databases
-db_resurv_and_EVA <- bind_rows(db_resurv_clean, db_EVA_clean)
+db_resurv_and_EVA <- bind_rows(db_resurv_updated_clean, db_EVA_updated_clean)
 ```
 
 # EUNIS level 1 availability
@@ -487,7 +492,7 @@ db_resurv_last %>%
 
 ```{r, include=FALSE}
 # Combine the two databases: EVA and EVA ReSurvey (with only last resurvey)
-db_resurv_last_and_EVA <- bind_rows(db_resurv_last, db_EVA_clean)
+db_resurv_last_and_EVA <- bind_rows(db_resurv_last, db_EVA_updated_clean)
 ```
 
 ## Availabilty
@@ -597,7 +602,7 @@ ggplot(db_resurv_and_EVA %>%
            position = position_dodge(width = 0.9)) +
   labs(y = "% of observations") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggtitle("Range of location uncertainty\nEVA (without ReSurvey))")
+  ggtitle("Range of location uncertainty\nEVA (without ReSurvey)")
 ggplot(db_resurv_and_EVA %>%
          filter(database == "EVA_RS") %>%
          # Create column to show two categories for location uncertainty
@@ -624,7 +629,7 @@ ggplot(db_resurv_and_EVA %>%
            position = position_dodge(width = 0.9)) +
   labs(y = "% of observations") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggtitle("Range of location uncertainty\nEVA ReSurvey (all resurveys))")
+  ggtitle("Range of location uncertainty\nEVA ReSurvey (all resurveys)")
 ggplot(db_resurv_last_and_EVA %>%
            filter(database == "EVA_RS") %>%
            # Create column to show two categories for location uncertainty
