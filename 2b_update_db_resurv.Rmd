@@ -1204,20 +1204,16 @@ Update db_resurv_updated.
 
 ```{r}
 db_resurv_updated <- db_resurv_updated %>%
-  # Create an UpdateFlag to mark rows to update
-  mutate(UpdateFlag = RS_CODE == "ES_0001d" & correct == "manually" &
-           RS_TIME ==2) %>%
-  # Update `Date of recording` if UpdateFlag = TRUE
+  # Approach creating an UpdateFlag assigns NAs to several dates, not sure why!
+  # Update `Date of recording` just for the particular PlotObservationID
   mutate(
     `Date of recording` = if_else(
-      UpdateFlag,
+      PlotObservationID == "523615",
       str_replace_all(`Date of recording`, "2005", "2018"),
       `Date of recording`)
     ) %>%
   # Update column edit_date to label edits
-  mutate(edit_date = if_else(UpdateFlag, TRUE, edit_date)) %>%
-  # Remove unneeded column
-  select(-UpdateFlag)
+  mutate(edit_date = if_else(PlotObservationID == "523615", TRUE, edit_date))
 ```
 
 ### FR_0002f
