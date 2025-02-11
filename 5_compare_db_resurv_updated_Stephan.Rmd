@@ -1,0 +1,147 @@
+---
+title: "Script to compare my update of db_resurv and Stephan's update"
+author: "Alicia Valdés"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_notebook
+---
+
+# Load libraries
+
+```{r}
+library(readr)
+library(dplyr)
+library(here)
+library(readxl)
+library(stringr)
+library(tidyverse)
+```
+
+# Read the data
+
+```{r}
+# My update
+db_resurv_A <- read_tsv(
+  here("data", "clean", "db_resurv_updated_clean.csv"))
+
+# Stephan's update
+db_resurv_S <- read_tsv(here("..", "..", "..", "Data", "MOTIVATE_data", "Data",
+                             "EVA and ReSurvey Data", "Raw data",
+                             "200_MOTIVATE20240412_header_notJUICE_with_precise_coordinates.csv"))
+```
+
+# Keep same columns in my update and Stephan's update
+
+```{r}
+db_resurv_A <- db_resurv_A %>%
+  select(-starts_with("EUNIS")) %>%
+  select(-c(70:83, 85:93))
+```
+
+# Compare the two updates
+
+```{r}
+# Join the tibbles by PlotObservationID
+joined_tibbles <- db_resurv_A %>%
+  inner_join(db_resurv_S, by = "PlotObservationID", suffix = c("_A", "_S"))
+```
+
+```{r}
+nrow(joined_tibbles %>% filter(country_new != Country_S) %>%
+       select(PlotObservationID, country_new, Country_S))
+nrow(joined_tibbles %>% filter(Country_A != Country_S) %>%
+       select(PlotObservationID, Country_A, Country_S))
+```
+
+Differences in Country are not so important!
+
+```{r}
+nrow(joined_tibbles %>% filter(`Expert System_A` != `Expert System_S`) %>%
+       select(PlotObservationID, `Expert System_A`, `Expert System_S`))
+print(
+  joined_tibbles %>% filter(`Expert System_A` != `Expert System_S`) %>%
+    select(PlotObservationID, `Expert System_A`, `Expert System_S`) %>%
+    count(`Expert System_A`, `Expert System_S`),
+  n = 100)
+```
+
+OK (just because I removed ! etc.).
+
+```{r}
+# Define the columns you want to compare
+columns_to_compare <- c("ReSurvey plot (Y/N)", "ReSurvey project",
+                        "ReSurvey site", "ReSurvey plot",
+                        "ReSurvey observation", "RS_CODE", "RS_TIME",
+                        "Location uncertainty (m)", "Dataset","Longitude",
+                        "Latitude")
+
+# Use map to iterate over the columns and count differences
+difference_counts <- map_int(columns_to_compare, ~ {
+  nrow(joined_tibbles %>%
+         filter(!!sym(paste0(.x, "_A")) != !!sym(paste0(.x, "_S"))) %>%
+         select(PlotObservationID, !!sym(paste0(.x, "_A")), !!sym(paste0(.x, "_S"))))
+})
+
+# Create a named vector for better readability
+names(difference_counts) <- columns_to_compare
+
+# View the counts
+print(difference_counts)
+```
+
+```{r}
+joined_tibbles %>% filter(`ReSurvey site_A` != `ReSurvey site_S`) %>%
+       select(PlotObservationID, `ReSurvey site_A`, `ReSurvey site_S`)
+```
+
+Remark in Ilona's file: CZ_0001 - Repeated RS_plot should be Slana1.
+
+Change ReSurvey site from "Slana1" to "Slana".
+
+Remark in Ilona's file: SI_0002a - error in RS_SITE changed for RF.
+
+Change ReSurvey site FS to RS.
+
+```{r}
+joined_tibbles %>% filter(`ReSurvey plot_A` != `ReSurvey plot_S`) %>%
+       select(PlotObservationID, `ReSurvey plot_A`, `ReSurvey plot_S`)
+```
+
+Some changes I remember doing, others not.
+
+```{r}
+joined_tibbles %>% filter(`ReSurvey observation_A` != `ReSurvey observation_S`) %>%
+       select(PlotObservationID, `ReSurvey observation_A`, `ReSurvey observation_S`)
+```
+
+Looks like parsing problems maybe?
+
+```{r}
+joined_tibbles %>% filter(`Location uncertainty (m)_A` !=
+                            `Location uncertainty (m)_S`) %>%
+       select(PlotObservationID, RS_CODE_A, `Location uncertainty (m)_A`,
+              `Location uncertainty (m)_S`)
+```
+
+CZ_0019_048 - Need to update Longitude, Latitude and Location uncertainty (m) (coded as PRECISION).
+
+```{r}
+joined_tibbles %>% filter(Longitude_A != Longitude_S) %>%
+       select(PlotObservationID, RS_CODE_A, Longitude_A, Longitude_S) %>%
+  distinct(RS_CODE_A)
+```
+
+```{r}
+joined_tibbles %>% filter(Latitude_A != Latitude_S) %>%
+       select(PlotObservationID, RS_CODE_A, Latitude_A, Latitude_S) %>%
+  distinct(RS_CODE_A)
+```
+
+# Conclusion
+
+Using my own version from now on, did not notify Stephan or Ilona about these inconsistencies, check again when Ilona provides new version and report.
+
+# Session info
+
+```{r}
+sessionInfo()
+```
